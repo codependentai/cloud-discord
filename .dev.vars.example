@@ -1,0 +1,6 @@
+# Copy this to .dev.vars for local development (npx wrangler dev)
+# These are NEVER committed — .dev.vars is in .gitignore
+
+DISCORD_BOT_TOKEN="your-bot-token"
+ANTHROPIC_API_KEY="your-anthropic-key"       # Optional: needed for /vibe command
+ELEVENLABS_API_KEY="your-elevenlabs-key"     # Optional: needed for voice notes

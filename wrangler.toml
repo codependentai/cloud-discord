@@ -1,0 +1,11 @@
+name = "cloud-discord"
+main = "src/index.ts"
+compatibility_date = "2025-02-14"
+
+[vars]
+# Secret path for MCP endpoint auth — your MCP URL will be: https://<worker>.workers.dev/mcp/<this-value>
+# Generate one with: openssl rand -base64 24
+MCP_SECRET_PATH = "CHANGE_ME"
+
+# Your Discord application's public key (from https://discord.com/developers/applications)
+DISCORD_PUBLIC_KEY = "CHANGE_ME"
