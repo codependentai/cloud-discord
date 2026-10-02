@@ -8,7 +8,7 @@ export const DISCORD_TOOLS = [
   // === MESSAGING ===
   {
     name: 'discord_read_messages',
-    description: 'Read message history from a Discord channel',
+    description: 'Read recent messages from a channel, oldest first. Each line includes the message ID, which you need to reply, react, pin, edit or delete. Use before/after with a message ID to page.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -22,7 +22,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_read_dm_messages',
-    description: 'Read DM message history with a user',
+    description: 'Read recent DM messages with a user, oldest first, with message IDs. Use before/after to page.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -36,7 +36,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_send_message',
-    description: 'Send a message to a Discord channel',
+    description: 'Send a message to a channel or thread (max 2000 characters). Set reply_to to a message ID to reply to it.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -49,7 +49,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_send_dm',
-    description: 'Send a direct message to a user',
+    description: 'Send a direct message to a user (max 2000 characters). Fails if the user shares no server with the bot or has DMs closed.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -61,7 +61,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_edit_message',
-    description: 'Edit a message sent by the bot',
+    description: 'Edit a message. Only works on messages the bot itself sent.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -74,7 +74,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_delete_message',
-    description: 'Delete a Discord message',
+    description: 'Delete a message. Deleting someone else\'s message needs Manage Messages. Cannot be undone.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -86,7 +86,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_bulk_delete_messages',
-    description: 'Bulk delete messages (2-100, must be <14 days old). Requires MANAGE_MESSAGES.',
+    description: 'Bulk delete 2-100 messages from one channel. Messages older than 14 days are rejected. Requires Manage Messages. Cannot be undone.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -98,7 +98,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_send_embed',
-    description: 'Send a rich embed message to a channel',
+    description: 'Send a rich embed (title, description, fields, images, color) to a channel. Description max 4096 characters, up to 25 fields.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -126,7 +126,7 @@ export const DISCORD_TOOLS = [
       properties: {
         channel_id: { type: 'string', description: 'The channel ID' },
         message_id: { type: 'string', description: 'The message ID' },
-        emoji: { type: 'string', description: 'The emoji (Unicode or custom format <:name:id>)' },
+        emoji: { type: 'string', description: 'A Unicode emoji (e.g. 👍), or a custom emoji as <:name:id> or name:id' },
       },
       required: ['channel_id', 'message_id', 'emoji'],
     },
@@ -139,7 +139,7 @@ export const DISCORD_TOOLS = [
       properties: {
         channel_id: { type: 'string', description: 'The channel ID' },
         message_id: { type: 'string', description: 'The message ID' },
-        emoji: { type: 'string', description: 'The emoji (Unicode or custom format <:name:id>)' },
+        emoji: { type: 'string', description: 'A Unicode emoji (e.g. 👍), or a custom emoji as <:name:id> or name:id' },
         user_id: { type: 'string', description: 'User ID to remove reaction for (omit for bot\'s own)' },
       },
       required: ['channel_id', 'message_id', 'emoji'],
@@ -147,7 +147,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_get_message_reactions',
-    description: 'Get all reactions on a message',
+    description: 'Get reaction counts on a message',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -198,7 +198,7 @@ export const DISCORD_TOOLS = [
   // === CHANNELS ===
   {
     name: 'discord_list_channels',
-    description: 'List all channels in a guild/server',
+    description: 'List a server\'s channels grouped by category, with channel IDs. Start here to find a channel_id.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -209,7 +209,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_list_servers',
-    description: 'List all Discord servers the bot is in',
+    description: 'List the servers the bot is in, with guild IDs. Start here to find a guild_id.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
@@ -248,7 +248,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_delete_channel',
-    description: 'Delete a channel',
+    description: 'Delete a channel and all its messages. Cannot be undone.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -271,7 +271,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_set_channel_permissions',
-    description: 'Set permission overwrites for a role or user on a channel',
+    description: 'Set a permission overwrite for a role or member on a channel. allow/deny are permission bitfields as decimal strings, e.g. VIEW_CHANNEL=1024, SEND_MESSAGES=2048, READ_MESSAGE_HISTORY=65536; add values to combine. Replaces any existing overwrite for that role or member.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -315,7 +315,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_delete_thread',
-    description: 'Delete a thread',
+    description: 'Delete a thread and its messages. Cannot be undone.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -328,7 +328,7 @@ export const DISCORD_TOOLS = [
   // === FORUM ===
   {
     name: 'discord_create_forum_post',
-    description: 'Create a post in a forum channel',
+    description: 'Create a post (a thread with a first message) in a forum channel. Use discord_get_forum_tags for tag IDs; some forums require a tag.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -424,7 +424,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_delete_forum_tag',
-    description: 'Delete a tag from a forum channel',
+    description: 'Delete a tag from a forum channel. It is removed from every post that had it.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -508,7 +508,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_delete_role',
-    description: 'Delete a role',
+    description: 'Delete a role from the server. Cannot be undone.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -520,7 +520,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_assign_role',
-    description: 'Assign a role to a member',
+    description: 'Give a role to a member. The bot\'s highest role must be above the role being assigned.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -533,7 +533,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_remove_role',
-    description: 'Remove a role from a member',
+    description: 'Remove a role from a member. The bot\'s highest role must be above that role.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -560,7 +560,7 @@ export const DISCORD_TOOLS = [
   // === MEMBERS & MODERATION ===
   {
     name: 'discord_get_guild_members',
-    description: 'Get list of members in a guild',
+    description: 'List server members with user IDs. Requires the Server Members privileged intent enabled on the bot.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -584,7 +584,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_get_user_info',
-    description: 'Get information about a Discord user',
+    description: 'Get a user\'s username, display name, bot flag and avatar URL',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -595,7 +595,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_kick_member',
-    description: 'Kick a member from a guild. Requires KICK_MEMBERS permission.',
+    description: 'Kick a member from a server (they can rejoin with an invite). Requires Kick Members. The reason is shown in the audit log.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -608,7 +608,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_ban_member',
-    description: 'Ban a member from a guild. Requires BAN_MEMBERS permission.',
+    description: 'Ban a user from a server, optionally deleting their recent messages. Requires Ban Members. The reason is shown in the audit log.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -634,7 +634,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_timeout_member',
-    description: 'Timeout (mute) a member. Set duration to 0 to remove timeout.',
+    description: 'Timeout (mute) a member for up to 28 days, or set duration_seconds to 0 to lift a timeout. Requires Moderate Members.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -661,7 +661,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_get_audit_log',
-    description: 'Get the audit log for a guild',
+    description: 'Read the server audit log, newest first. Requires View Audit Log. Common action_type values: 20 kick, 22 ban, 25 member role update, 72 message delete.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -702,7 +702,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_delete_invite',
-    description: 'Delete/revoke an invite',
+    description: 'Revoke an invite by its code (the part after discord.gg/)',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -748,7 +748,7 @@ export const DISCORD_TOOLS = [
       type: 'object' as const,
       properties: {
         channel_id: { type: 'string', description: 'The channel ID' },
-        file_url: { type: 'string', description: 'URL of the file to fetch and send (preferred)' },
+        file_url: { type: 'string', description: 'Public URL of the file to fetch and send (preferred). Discord upload limits apply (10 MB on unboosted servers).' },
         file_base64: { type: 'string', description: 'File content as base64 (fallback for small files)' },
         file_name: { type: 'string', description: 'File name with extension (e.g., audio.mp3, image.png)' },
         content_type: { type: 'string', description: 'MIME type when using base64 (e.g., audio/mpeg)', default: 'application/octet-stream' },
@@ -764,7 +764,7 @@ export const DISCORD_TOOLS = [
       type: 'object' as const,
       properties: {
         user_id: { type: 'string', description: 'The user ID to DM' },
-        file_url: { type: 'string', description: 'URL of the file to fetch and send (preferred)' },
+        file_url: { type: 'string', description: 'Public URL of the file to fetch and send (preferred). Discord upload limits apply (10 MB on unboosted servers).' },
         file_base64: { type: 'string', description: 'File content as base64 (fallback for small files)' },
         file_name: { type: 'string', description: 'File name with extension' },
         content_type: { type: 'string', description: 'MIME type when using base64', default: 'application/octet-stream' },
@@ -794,7 +794,7 @@ export const DISCORD_TOOLS = [
   // === POLLS ===
   {
     name: 'discord_create_poll',
-    description: 'Create a poll in a channel',
+    description: 'Create a native Discord poll with 2-10 answers',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -809,6 +809,26 @@ export const DISCORD_TOOLS = [
   },
 ];
 
+// ============ TOOL ANNOTATIONS ============
+// Hints MCP clients use to decide what needs confirmation. Read-only tools never change
+// anything; destructive tools remove or lock out something that can't simply be re-sent.
+
+const DESTRUCTIVE_TOOLS = new Set([
+  'discord_delete_message', 'discord_bulk_delete_messages', 'discord_delete_channel',
+  'discord_delete_thread', 'discord_delete_forum_tag', 'discord_delete_role',
+  'discord_remove_role', 'discord_kick_member', 'discord_ban_member',
+  'discord_timeout_member', 'discord_delete_invite', 'discord_set_channel_permissions',
+]);
+
+export function toolAnnotations(name: string) {
+  const readOnly = /^discord_(read|get|list|fetch)_/.test(name);
+  return {
+    readOnlyHint: readOnly,
+    destructiveHint: !readOnly && DESTRUCTIVE_TOOLS.has(name),
+    openWorldHint: true,
+  };
+}
+
 // ============ CHANNEL TYPE MAP (Discord API integers) ============
 
 const CHANNEL_TYPES: Record<string, number> = {
@@ -817,6 +837,12 @@ const CHANNEL_TYPES: Record<string, number> = {
   category: 4,
   forum: 15,
 };
+
+// Discord's reaction endpoints want custom emoji as name:id, not the <:name:id> chat form
+function reactionEmoji(emoji: string): string {
+  const custom = emoji.trim().match(/^<a?:(\w+):(\d+)>$/);
+  return encodeURIComponent(custom ? `${custom[1]}:${custom[2]}` : emoji.trim());
+}
 
 function parseColor(color?: string): number | undefined {
   if (!color) return undefined;
@@ -972,14 +998,14 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
 
     // === REACTIONS ===
     case 'discord_add_reaction': {
-      const emoji = encodeURIComponent(args.emoji as string);
+      const emoji = reactionEmoji(args.emoji as string);
       const res = await discordFetch(token, 'PUT', `/channels/${args.channel_id}/messages/${args.message_id}/reactions/${emoji}/@me`);
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);
       return `Reacted with ${args.emoji}`;
     }
 
     case 'discord_remove_reaction': {
-      const emoji = encodeURIComponent(args.emoji as string);
+      const emoji = reactionEmoji(args.emoji as string);
       const target = args.user_id ? args.user_id : '@me';
       const res = await discordFetch(token, 'DELETE', `/channels/${args.channel_id}/messages/${args.message_id}/reactions/${emoji}/${target}`);
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);

@@ -1,7 +1,7 @@
-# Copy this to .dev.vars for local development (npx wrangler dev)
-# These are NEVER committed — .dev.vars is in .gitignore
+# Copy this to .dev.vars for local development (npm run dev).
+# .dev.vars is gitignored; never commit it.
 
-DISCORD_BOT_TOKEN="your-bot-token"
-ANTHROPIC_API_KEY="your-anthropic-key"       # Optional: needed for /vibe command
-ELEVENLABS_API_KEY="your-elevenlabs-key"     # Optional: needed for voice notes
-ELEVENLABS_VOICE_ID="your-voice-id"          # Optional: default voice for voice notes
+DISCORD_BOT_TOKEN="your-bot-token"            # Required
+ANTHROPIC_API_KEY="your-anthropic-key"        # Optional: for the /vibe command
+ELEVENLABS_API_KEY="your-elevenlabs-key"      # Optional: for voice notes
+ELEVENLABS_VOICE_ID="your-voice-id"           # Optional: default voice for voice notes
