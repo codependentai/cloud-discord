@@ -5,15 +5,9 @@ import { DISCORD_TOOLS, handleDiscordTool, toolAnnotations } from './tools';
 import { discordFetch, discordFetchMultipart, formatMessage } from './discord';
 import Anthropic from '@anthropic-ai/sdk';
 import nacl from 'tweetnacl';
+import { Agent, AgentEnv, DEFAULT_AGENT_NAME, findAgentByName, loadAgents, matchMcpPath } from './agents';
 
-interface Env {
-  DISCORD_BOT_TOKEN: string;
-  MCP_SECRET_PATH: string;
-  DISCORD_PUBLIC_KEY: string;
-  ANTHROPIC_API_KEY: string;
-  ELEVENLABS_API_KEY: string;
-  ELEVENLABS_VOICE_ID?: string;
-}
+type Env = AgentEnv;
 
 export interface ExecutionContext {
   waitUntil(promise: Promise<any>): void;
@@ -96,17 +90,22 @@ async function verifyKey(
   }
 }
 
-async function handleVibeCommand(interaction: any, env: Env) {
+async function handleVibeCommand(interaction: any, agent: Agent) {
   try {
     const channelId = interaction.channel_id;
     const appId = interaction.application_id;
     const token = interaction.token;
 
-    console.log(`[vibe] Starting vibe check for channel ${channelId}`);
+    console.log(`[vibe] Starting vibe check for channel ${channelId} (agent ${agent.name})`);
+
+    if (!agent.anthropicApiKey) {
+      await updateInteractionResponse(appId, token, agent.discordToken, 'The vibe check isn\'t set up here yet (no Anthropic API key).');
+      return;
+    }
 
     // 1. Fetch last 20 messages
     console.log(`[vibe] Fetching messages...`);
-    const res = await discordFetch(env.DISCORD_BOT_TOKEN, 'GET', `/channels/${channelId}/messages?limit=20`);
+    const res = await discordFetch(agent.discordToken, 'GET', `/channels/${channelId}/messages?limit=20`);
     if (!res.ok) {
       console.log(`[vibe] Fetch failed:`, res);
       throw new Error(`Failed to fetch messages: ${res.status}`);
@@ -116,7 +115,7 @@ async function handleVibeCommand(interaction: any, env: Env) {
     console.log(`[vibe] Fetched ${messages?.length || 0} messages.`);
     if (!messages || messages.length === 0) {
       console.log(`[vibe] No messages found, returning early.`);
-      await updateInteractionResponse(appId, token, env.DISCORD_BOT_TOKEN, 'It\'s too quiet in here to catch a vibe.');
+      await updateInteractionResponse(appId, token, agent.discordToken, 'It\'s too quiet in here to catch a vibe.');
       return;
     }
 
@@ -127,7 +126,7 @@ async function handleVibeCommand(interaction: any, env: Env) {
     // 3. Call Anthropic API
     console.log(`[vibe] Initializing Anthropic...`);
     const anthropic = new Anthropic({
-      apiKey: env.ANTHROPIC_API_KEY,
+      apiKey: agent.anthropicApiKey,
     });
 
     console.log(`[vibe] Calling Anthropic API...`);
@@ -152,11 +151,11 @@ Instructions:
 
     // 4. Update Interaction
     console.log(`[vibe] Updating interaction response...`);
-    await updateInteractionResponse(appId, token, env.DISCORD_BOT_TOKEN, `**Current Vibe:** ${vibeSummary}`);
+    await updateInteractionResponse(appId, token, agent.discordToken, `**Current Vibe:** ${vibeSummary}`);
     console.log(`[vibe] Done.`);
   } catch (error: any) {
     console.error('[vibe] Error in handleVibeCommand:', error);
-    await updateInteractionResponse(interaction.application_id, interaction.token, env.DISCORD_BOT_TOKEN, `Uh oh, the vibe check failed: ${error.message || 'Unknown error'}`);
+    await updateInteractionResponse(interaction.application_id, interaction.token, agent.discordToken, `Uh oh, the vibe check failed: ${error.message || 'Unknown error'}`);
   }
 }
 
@@ -169,9 +168,14 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // Discord Interactions Webhook
-    if (path === '/interactions' && request.method === 'POST') {
-      const { isValid, body } = await verifyKey(request, env.DISCORD_PUBLIC_KEY);
+    // Discord Interactions Webhook — /interactions for the default bot, /interactions/<agent> for the others
+    const interactionsMatch = path.match(/^\/interactions(?:\/([a-z0-9_-]+))?$/);
+    if (interactionsMatch && request.method === 'POST') {
+      const agent = findAgentByName(loadAgents(env), interactionsMatch[1] ?? DEFAULT_AGENT_NAME);
+      if (!agent?.discordPublicKey) {
+        return new Response('Not found', { status: 404 });
+      }
+      const { isValid, body } = await verifyKey(request, agent.discordPublicKey);
       if (!isValid) {
         return new Response('Bad request signature', { status: 401 });
       }
@@ -186,7 +190,7 @@ export default {
       // type 2: Slash Command
       if (interaction.type === 2 && interaction.data?.name === 'vibe') {
         // Acknowledge the command and defer the response
-        ctx.waitUntil(handleVibeCommand(interaction, env));
+        ctx.waitUntil(handleVibeCommand(interaction, agent));
         return Response.json({ type: 5 }); // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
       }
 
@@ -199,20 +203,17 @@ export default {
       return Response.json({ status: 'ok', tools: DISCORD_TOOLS.length });
     }
 
-    // Secret path check — all MCP endpoints require /mcp/<SECRET>
-    // Fail closed if the secret was never set, so an unconfigured deploy isn't open at /mcp/CHANGE_ME
-    if (!env.MCP_SECRET_PATH || env.MCP_SECRET_PATH === 'CHANGE_ME') {
+    // Secret path check — all MCP endpoints require /mcp/<SECRET>, and the secret picks the agent.
+    // Unset or CHANGE_ME secrets never match, so an unconfigured deploy isn't open.
+    const matched = matchMcpPath(loadAgents(env), path);
+    if (!matched) {
       return new Response('Not found', { status: 404 });
     }
-    const expectedPrefix = `/mcp/${env.MCP_SECRET_PATH}`;
-    if (path !== expectedPrefix && !path.startsWith(`${expectedPrefix}/`)) {
-      return new Response('Not found', { status: 404 });
-    }
+    const { agent, subPath } = matched;
 
     // Direct file upload endpoint — bypasses MCP, accepts multipart/form-data
     // Usage: curl -F "channel_id=123" -F "file=@/path/to/file.mp3" -F "message=optional text" URL/mcp/<secret>/upload
     // For DMs: curl -F "user_id=123" -F "file=@/path/to/file.mp3" URL/mcp/<secret>/upload
-    const subPath = path.slice(expectedPrefix.length);
     if (subPath === '/upload' && request.method === 'POST') {
       try {
         const formData = await request.formData();
@@ -231,7 +232,7 @@ export default {
         // Resolve target channel (DM if user_id, otherwise channel_id)
         let targetChannelId = channelId;
         if (!targetChannelId && userId) {
-          const dmRes = await discordFetch(env.DISCORD_BOT_TOKEN, 'POST', '/users/@me/channels', { recipient_id: userId });
+          const dmRes = await discordFetch(agent.discordToken, 'POST', '/users/@me/channels', { recipient_id: userId });
           if (!dmRes.ok) {
             return Response.json({ error: `Failed to open DM: ${JSON.stringify(dmRes.data)}` }, { status: 500 });
           }
@@ -249,7 +250,7 @@ export default {
         if (message) payload.content = message;
 
         const res = await discordFetchMultipart(
-          env.DISCORD_BOT_TOKEN, 'POST',
+          agent.discordToken, 'POST',
           `/channels/${targetChannelId}/messages`,
           payload, fileData, fileName, contentType,
         );
@@ -328,7 +329,9 @@ export default {
               : SUPPORTED_PROTOCOL_VERSIONS[0],
             serverInfo: SERVER_INFO,
             capabilities: SERVER_CAPABILITIES,
-            instructions: SERVER_INSTRUCTIONS,
+            instructions: agent.name === DEFAULT_AGENT_NAME
+              ? SERVER_INSTRUCTIONS
+              : `This connection acts as the bot for agent "${agent.name}".\n${SERVER_INSTRUCTIONS}`,
           };
           break;
         }
@@ -359,10 +362,10 @@ export default {
 
           try {
             const toolResult = await handleDiscordTool(
-              env.DISCORD_BOT_TOKEN,
+              agent.discordToken,
               params.name,
               params.arguments || {},
-              { elevenLabsApiKey: env.ELEVENLABS_API_KEY, elevenLabsVoiceId: env.ELEVENLABS_VOICE_ID },
+              { elevenLabsApiKey: agent.elevenLabsApiKey, elevenLabsVoiceId: agent.elevenLabsVoiceId },
             );
             result = {
               content: typeof toolResult === 'string' ? [{ type: 'text', text: toolResult }] : toolResult,

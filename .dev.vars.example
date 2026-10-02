@@ -5,3 +5,6 @@ DISCORD_BOT_TOKEN="your-bot-token"            # Required
 ANTHROPIC_API_KEY="your-anthropic-key"        # Optional: for the /vibe command
 ELEVENLABS_API_KEY="your-elevenlabs-key"      # Optional: for voice notes
 ELEVENLABS_VOICE_ID="your-voice-id"           # Optional: default voice for voice notes
+
+# Optional: several agents, each with its own bot. See "Several agents" in the README.
+# AGENTS='{"fable":{"secret_path":"at-least-16-chars","discord_token":"..."}}'
