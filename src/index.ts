@@ -12,6 +12,7 @@ interface Env {
   DISCORD_PUBLIC_KEY: string;
   ANTHROPIC_API_KEY: string;
   ELEVENLABS_API_KEY: string;
+  ELEVENLABS_VOICE_ID?: string;
 }
 
 export interface ExecutionContext {
@@ -47,6 +48,9 @@ const SERVER_INFO = {
   name: 'cloud-discord',
   version: '1.0.0',
 };
+
+// Protocol versions this server can speak; the newest is offered when the client asks for one we don't know
+const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
 const SERVER_CAPABILITIES = {
   tools: {},
@@ -189,8 +193,12 @@ export default {
     }
 
     // Secret path check — all MCP endpoints require /mcp/<SECRET>
+    // Fail closed if the secret was never set, so an unconfigured deploy isn't open at /mcp/CHANGE_ME
+    if (!env.MCP_SECRET_PATH || env.MCP_SECRET_PATH === 'CHANGE_ME') {
+      return new Response('Not found', { status: 404 });
+    }
     const expectedPrefix = `/mcp/${env.MCP_SECRET_PATH}`;
-    if (!path.startsWith(expectedPrefix)) {
+    if (path !== expectedPrefix && !path.startsWith(`${expectedPrefix}/`)) {
       return new Response('Not found', { status: 404 });
     }
 
@@ -296,21 +304,30 @@ export default {
 
     const id = body.id ?? null;
 
+    // Notifications (no id) get no JSON-RPC response — just acknowledge them
+    if (typeof body.method === 'string' && body.method.startsWith('notifications/')) {
+      return new Response(null, { status: 202, headers: corsHeaders });
+    }
+
     try {
       let result: unknown;
 
       switch (body.method) {
-        case 'initialize':
+        case 'initialize': {
+          const requested = (body.params as { protocolVersion?: string } | undefined)?.protocolVersion;
           result = {
-            protocolVersion: '2024-11-05',
+            protocolVersion: requested && SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+              ? requested
+              : SUPPORTED_PROTOCOL_VERSIONS[0],
             serverInfo: SERVER_INFO,
             capabilities: SERVER_CAPABILITIES,
           };
           break;
+        }
 
-        case 'notifications/initialized':
-          // Client ack — no response needed for notifications
-          return new Response(null, { status: 204, headers: corsHeaders });
+        case 'ping':
+          result = {};
+          break;
 
         case 'tools/list':
           result = {
@@ -336,10 +353,10 @@ export default {
               env.DISCORD_BOT_TOKEN,
               params.name,
               params.arguments || {},
-              { elevenLabsApiKey: env.ELEVENLABS_API_KEY },
+              { elevenLabsApiKey: env.ELEVENLABS_API_KEY, elevenLabsVoiceId: env.ELEVENLABS_VOICE_ID },
             );
             result = {
-              content: [{ type: 'text', text: toolResult }],
+              content: typeof toolResult === 'string' ? [{ type: 'text', text: toolResult }] : toolResult,
             };
           } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
