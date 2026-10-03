@@ -140,7 +140,8 @@ The `discord_send_voice_note` tool generates speech using [ElevenLabs](https://e
 1. Sign up at [ElevenLabs](https://elevenlabs.io/) and get an API key
 2. Add the secret: `npx wrangler secret put ELEVENLABS_API_KEY`
 3. Find your voice ID in the [Voice Lab](https://elevenlabs.io/app/voice-lab)
-4. Use the tool with `voice_id` and `text` parameters
+4. Optionally set a default voice: `npx wrangler secret put ELEVENLABS_VOICE_ID`
+5. Use the tool with `text` (and `voice_id` if you didn't set a default)
 
 If `ELEVENLABS_API_KEY` is not set, the tool will return an error when called but won't affect any other tools.
 
@@ -168,7 +169,7 @@ This is useful when the MCP tool's base64 parameter would be too large (e.g., au
 ### Messaging
 | Tool | Description |
 |------|-------------|
-| `discord_read_messages` | Read channel message history (1-100 messages) |
+| `discord_read_messages` | Read channel message history (1-100 messages, page with `before`/`after`) |
 | `discord_read_dm_messages` | Read DM history with a user |
 | `discord_send_message` | Send a message, optionally as a reply |
 | `discord_send_dm` | Send a direct message to a user |
@@ -265,8 +266,8 @@ This is useful when the MCP tool's base64 parameter would be too large (e.g., au
 ### Images
 | Tool | Description |
 |------|-------------|
-| `discord_fetch_image` | Fetch a message attachment as base64 |
-| `discord_fetch_dm_image` | Fetch a DM attachment as base64 |
+| `discord_fetch_image` | Fetch a message attachment as image content the model can see |
+| `discord_fetch_dm_image` | Fetch a DM attachment as image content the model can see |
 
 ## Architecture
 
@@ -276,7 +277,7 @@ This is a single Cloudflare Worker (~330 KB) that:
 2. Translates tool calls into Discord REST API requests
 3. Returns formatted results to the MCP client
 
-No database, no state, no containers. Auth is handled by the secret path in the URL — anyone with the URL can use all tools, so treat it like an API key.
+No database, no state, no containers. Auth is handled by the secret path in the URL — anyone with the URL can use all tools, so treat it like an API key. If `MCP_SECRET_PATH` is unset or still `CHANGE_ME`, every MCP path returns 404.
 
 The `/vibe` slash command handles Discord interactions at `/interactions` using signature verification.
 

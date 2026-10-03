@@ -4,3 +4,4 @@
 DISCORD_BOT_TOKEN="your-bot-token"
 ANTHROPIC_API_KEY="your-anthropic-key"       # Optional: needed for /vibe command
 ELEVENLABS_API_KEY="your-elevenlabs-key"     # Optional: needed for voice notes
+ELEVENLABS_VOICE_ID="your-voice-id"          # Optional: default voice for voice notes

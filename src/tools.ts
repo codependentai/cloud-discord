@@ -14,6 +14,8 @@ export const DISCORD_TOOLS = [
       properties: {
         channel_id: { type: 'string', description: 'The channel ID to read from' },
         limit: { type: 'number', description: 'Number of messages to fetch (1-100)', default: 50 },
+        before: { type: 'string', description: 'Only messages before this message ID (page back through history)' },
+        after: { type: 'string', description: 'Only messages after this message ID' },
       },
       required: ['channel_id'],
     },
@@ -26,6 +28,8 @@ export const DISCORD_TOOLS = [
       properties: {
         user_id: { type: 'string', description: 'The user ID to read DMs from' },
         limit: { type: 'number', description: 'Number of messages to fetch (1-100)', default: 50 },
+        before: { type: 'string', description: 'Only messages before this message ID (page back through history)' },
+        after: { type: 'string', description: 'Only messages after this message ID' },
       },
       required: ['user_id'],
     },
@@ -711,7 +715,7 @@ export const DISCORD_TOOLS = [
   // === IMAGES ===
   {
     name: 'discord_fetch_image',
-    description: 'Fetch an image from a message attachment and return as base64',
+    description: 'Fetch an image from a message attachment and return it as viewable image content',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -724,7 +728,7 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_fetch_dm_image',
-    description: 'Fetch an image from a DM message',
+    description: 'Fetch an image from a DM message and return it as viewable image content',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -780,7 +784,7 @@ export const DISCORD_TOOLS = [
         text: { type: 'string', description: 'Text to speak' },
         channel_id: { type: 'string', description: 'Channel ID to send to (use this OR user_id)' },
         user_id: { type: 'string', description: 'User ID to DM (use this OR channel_id)' },
-        voice_id: { type: 'string', description: 'ElevenLabs voice ID override (optional)' },
+        voice_id: { type: 'string', description: 'ElevenLabs voice ID (optional if ELEVENLABS_VOICE_ID is set)' },
         message: { type: 'string', description: 'Optional text message to send alongside the voice note' },
       },
       required: ['text'],
@@ -850,6 +854,24 @@ async function resolveFileData(args: Record<string, unknown>): Promise<{ data: U
 
 export interface ToolExtras {
   elevenLabsApiKey?: string;
+  elevenLabsVoiceId?: string;
+}
+
+// MCP content blocks a tool can return instead of plain text
+export type ToolContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string };
+
+function auditReason(args: Record<string, unknown>): Record<string, string> | undefined {
+  return args.reason ? { 'X-Audit-Log-Reason': encodeURIComponent(args.reason as string) } : undefined;
+}
+
+function messageQuery(args: Record<string, unknown>): string {
+  const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 100);
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (args.before) params.set('before', String(args.before));
+  if (args.after) params.set('after', String(args.after));
+  return params.toString();
 }
 
 // Discord audit log action types for readable output
@@ -869,12 +891,11 @@ const AUDIT_ACTION_NAMES: Record<number, string> = {
 
 // ============ TOOL HANDLER ============
 
-export async function handleDiscordTool(token: string, name: string, args: Record<string, unknown>, extras?: ToolExtras): Promise<string> {
+export async function handleDiscordTool(token: string, name: string, args: Record<string, unknown>, extras?: ToolExtras): Promise<string | ToolContent[]> {
   switch (name) {
     // === MESSAGING ===
     case 'discord_read_messages': {
-      const limit = Math.min((args.limit as number) || 50, 100);
-      const res = await discordFetch(token, 'GET', `/channels/${args.channel_id}/messages?limit=${limit}`);
+      const res = await discordFetch(token, 'GET', `/channels/${args.channel_id}/messages?${messageQuery(args)}`);
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);
       const msgs = (res.data as any[]).reverse();
       if (msgs.length === 0) return 'No messages found';
@@ -885,8 +906,7 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
       const dmRes = await discordFetch(token, 'POST', '/users/@me/channels', { recipient_id: args.user_id });
       if (!dmRes.ok) throw new Error(`Failed to open DM: ${JSON.stringify(dmRes.data)}`);
       const dmChannelId = (dmRes.data as any).id;
-      const limit = Math.min((args.limit as number) || 50, 100);
-      const res = await discordFetch(token, 'GET', `/channels/${dmChannelId}/messages?limit=${limit}`);
+      const res = await discordFetch(token, 'GET', `/channels/${dmChannelId}/messages?${messageQuery(args)}`);
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);
       const msgs = (res.data as any[]).reverse();
       if (msgs.length === 0) return 'No DM messages found';
@@ -1136,7 +1156,10 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
       if (args.auto_archive_duration) body.auto_archive_duration = args.auto_archive_duration;
       // Forum pin uses flags — bit 1 (value 2) = PINNED
       if (args.pinned !== undefined) {
-        body.flags = (args.pinned as boolean) ? 2 : 0;
+        const chRes = await discordFetch(token, 'GET', `/channels/${args.thread_id}`);
+        if (!chRes.ok) throw new Error(`Discord API error: ${JSON.stringify(chRes.data)}`);
+        const currentFlags = (chRes.data as any).flags || 0;
+        body.flags = (args.pinned as boolean) ? (currentFlags | 2) : (currentFlags & ~2);
       }
       const res = await discordFetch(token, 'PATCH', `/channels/${args.thread_id}`, body);
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);
@@ -1257,10 +1280,9 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
       if (args.require_tag !== undefined) {
         // Bit 4 (value 16) = REQUIRE_TAG
         const chRes = await discordFetch(token, 'GET', `/channels/${args.channel_id}`);
-        if (chRes.ok) {
-          const currentFlags = (chRes.data as any).flags || 0;
-          body.flags = (args.require_tag as boolean) ? (currentFlags | 16) : (currentFlags & ~16);
-        }
+        if (!chRes.ok) throw new Error(`Discord API error: ${JSON.stringify(chRes.data)}`);
+        const currentFlags = (chRes.data as any).flags || 0;
+        body.flags = (args.require_tag as boolean) ? (currentFlags | 16) : (currentFlags & ~16);
       }
       const res = await discordFetch(token, 'PATCH', `/channels/${args.channel_id}`, body);
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);
@@ -1356,13 +1378,13 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
       const res = await discordFetch(token, 'GET', `/users/${args.user_id}`);
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);
       const user = res.data as any;
-      return `Username: ${user.username}\nID: ${user.id}\nBot: ${user.bot || false}\nAvatar: https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`;
+      const avatar = user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'none (default avatar)';
+      const display = user.global_name ? `\nDisplay name: ${user.global_name}` : '';
+      return `Username: ${user.username}${display}\nID: ${user.id}\nBot: ${user.bot || false}\nAvatar: ${avatar}`;
     }
 
     case 'discord_kick_member': {
-      const headers: Record<string, string> = {};
-      if (args.reason) headers['X-Audit-Log-Reason'] = encodeURIComponent(args.reason as string);
-      const res = await discordFetch(token, 'DELETE', `/guilds/${args.guild_id}/members/${args.user_id}`);
+      const res = await discordFetch(token, 'DELETE', `/guilds/${args.guild_id}/members/${args.user_id}`, undefined, auditReason(args));
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);
       return `User ${args.user_id} kicked from guild${args.reason ? ` (reason: ${args.reason})` : ''}`;
     }
@@ -1370,7 +1392,7 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
     case 'discord_ban_member': {
       const body: any = {};
       if (args.delete_message_seconds) body.delete_message_seconds = Math.min(args.delete_message_seconds as number, 604800);
-      const res = await discordFetch(token, 'PUT', `/guilds/${args.guild_id}/bans/${args.user_id}`, body);
+      const res = await discordFetch(token, 'PUT', `/guilds/${args.guild_id}/bans/${args.user_id}`, body, auditReason(args));
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);
       return `User ${args.user_id} banned from guild${args.reason ? ` (reason: ${args.reason})` : ''}`;
     }
@@ -1390,7 +1412,7 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
       }
       const res = await discordFetch(token, 'PATCH', `/guilds/${args.guild_id}/members/${args.user_id}`, {
         communication_disabled_until: communicationDisabledUntil,
-      });
+      }, auditReason(args));
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);
       return duration > 0
         ? `User ${args.user_id} timed out for ${duration}s`
@@ -1480,7 +1502,11 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
       if (idx >= attachments.length) throw new Error(`Attachment index ${idx} out of range`);
       const attachment = attachments[idx];
       if (!attachment.content_type?.startsWith('image/')) throw new Error('Attachment is not an image');
-      return fetchImageAsBase64(attachment.url);
+      const image = await fetchImageAsBase64(attachment.url);
+      return [
+        { type: 'image', data: image.data, mimeType: image.mimeType },
+        { type: 'text', text: `${attachment.filename} (${image.mimeType})` },
+      ];
     }
 
     case 'discord_fetch_dm_image': {
@@ -1496,7 +1522,11 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
       if (idx >= attachments.length) throw new Error(`Attachment index ${idx} out of range`);
       const attachment = attachments[idx];
       if (!attachment.content_type?.startsWith('image/')) throw new Error('Attachment is not an image');
-      return fetchImageAsBase64(attachment.url);
+      const image = await fetchImageAsBase64(attachment.url);
+      return [
+        { type: 'image', data: image.data, mimeType: image.mimeType },
+        { type: 'text', text: `${attachment.filename} (${image.mimeType})` },
+      ];
     }
 
     // === FILES ===
@@ -1527,9 +1557,10 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
     case 'discord_send_voice_note': {
       if (!extras?.elevenLabsApiKey) throw new Error('ElevenLabs API key not configured');
 
-      const voiceId = args.voice_id as string;
-      if (!voiceId) throw new Error('voice_id is required — get yours from https://elevenlabs.io/app/voice-lab');
+      const voiceId = (args.voice_id as string) || extras.elevenLabsVoiceId;
+      if (!voiceId) throw new Error('voice_id is required (or set ELEVENLABS_VOICE_ID) — get yours from https://elevenlabs.io/app/voice-lab');
       const text = args.text as string;
+      if (!args.channel_id && !args.user_id) throw new Error('Must provide channel_id or user_id');
 
       // Generate audio via ElevenLabs
       const ttsRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
@@ -1561,8 +1592,6 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
         if (!dmRes.ok) throw new Error(`Failed to open DM: ${JSON.stringify(dmRes.data)}`);
         targetChannelId = (dmRes.data as any).id;
       }
-      if (!targetChannelId) throw new Error('Must provide channel_id or user_id');
-
       const payload: any = { attachments: [{ id: 0, filename: fileName }] };
       if (args.message) payload.content = args.message;
 
