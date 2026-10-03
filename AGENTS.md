@@ -8,6 +8,7 @@ Notes for coding agents (and people) working on this repo. For *using* the serve
 - `src/tools.ts`: every tool. `DISCORD_TOOLS` holds the definitions (name, description, JSON Schema), and `handleDiscordTool` holds one `case` per tool. `toolAnnotations` derives the read-only and destructive hints.
 - `src/agents.ts`: the agents config. `parseAgents` reads the `AGENTS` JSON secret, plus the single-bot env vars as the `default` agent. `matchMcpPath` maps a secret URL to its agent with a timing-safe compare. Every Discord call must use the matched agent's token, never `env.DISCORD_BOT_TOKEN` directly.
 - `src/discord.ts`: Discord REST helpers. All Discord calls go through `discordFetch` / `discordFetchMultipart`, which handle 429 retries and non-JSON error bodies.
+- `src/voice.ts`: reads duration and waveform from Ogg/Opus audio for native voice messages, without decoding.
 - `src/register-commands.ts`: a one-off Node script that registers `/vibe`. It's not part of the Worker and is excluded from the Worker typecheck.
 
 ## Adding or changing a tool
