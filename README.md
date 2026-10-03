@@ -9,6 +9,7 @@ You deploy it once to your own Cloudflare account and connect any MCP client to 
 ## Contents
 
 - [Setup](#setup)
+- [Several agents on one deployment](#several-agents-on-one-deployment)
 - [Configuration reference](#configuration-reference)
 - [Troubleshooting](#troubleshooting)
 - [Tips for agents](#tips-for-agents)
@@ -137,6 +138,54 @@ If you commit `.mcp.json`, the secret URL goes with it. For a shared repo, add t
 
 **Other clients** (Cursor and so on): add a remote or "Streamable HTTP" MCP server with the same URL.
 
+## Several agents on one deployment
+
+One Worker can serve several agents, each as its own Discord bot with its own name, avatar, roles and permissions. Each agent gets its own MCP URL and only ever uses its own bot token, so agents can't act as each other.
+
+1. **Create a bot for each agent** (Setup, step 1), and invite each one to the servers it should be in.
+2. **Describe the agents in a JSON file.** Copy `agents.example.json` to `agents.json` (it's gitignored) and give each agent an entry:
+
+   ```json
+   {
+     "fable": {
+       "secret_path": "output of openssl rand -hex 24",
+       "discord_token": "fable's bot token",
+       "elevenlabs_voice_id": "fable's voice"
+     },
+     "simon": {
+       "secret_path": "a different random value",
+       "discord_token": "simon's bot token"
+     }
+   }
+   ```
+
+   | Field | Required | Notes |
+   |-------|----------|-------|
+   | `secret_path` | yes | At least 16 characters, no `/`, different for every agent |
+   | `discord_token` | yes | This agent's bot token |
+   | `elevenlabs_voice_id` | no | This agent's voice for voice notes |
+   | `elevenlabs_api_key` | no | Own ElevenLabs key; otherwise the shared `ELEVENLABS_API_KEY` is used |
+   | `anthropic_api_key` | no | Own key for `/vibe`; otherwise the shared `ANTHROPIC_API_KEY` is used |
+   | `discord_public_key` | for `/vibe` | This bot's public key (Developer Portal > General Information) |
+
+   Agent names are lowercase letters, digits, `-` and `_`. The name `default` is reserved.
+3. **Store it as one secret and deploy:**
+
+   ```bash
+   npx wrangler secret put AGENTS < agents.json
+   npm run deploy
+   ```
+
+4. **Connect each agent to its own URL:** `https://cloud-discord.<your-subdomain>.workers.dev/mcp/<that agent's secret_path>`. When the agent connects, the server tells it which agent it is.
+
+To add or change an agent, edit `agents.json` and run `npx wrangler secret put AGENTS < agents.json` again. You don't need to redeploy.
+
+An entry with a problem (a short or repeated `secret_path`, a missing token) is skipped, never served, and the other agents keep working. `npm run tail` shows why an agent was skipped.
+
+**The single-bot setup still works alongside this.** `DISCORD_BOT_TOKEN` with `MCP_SECRET_PATH` acts as an agent named `default`, so an existing deployment keeps its URL when you add more agents.
+
+**`/vibe` for each bot:** register the command for each bot's application (see [/vibe](#vibe-slash-command)), and set that application's Interactions Endpoint URL to `https://cloud-discord.<your-subdomain>.workers.dev/interactions/<agent-name>`. The default bot keeps using `/interactions`.
+
 ## Configuration reference
 
 | Name | Kind | Required | What it's for |
@@ -147,6 +196,7 @@ If you commit `.mcp.json`, the secret URL goes with it. For a shared repo, add t
 | `ANTHROPIC_API_KEY` | secret | for `/vibe` | Writes the vibe summary |
 | `ELEVENLABS_API_KEY` | secret | for voice notes | Text-to-speech |
 | `ELEVENLABS_VOICE_ID` | secret | no | Default voice, so `voice_id` can be left out of each call |
+| `AGENTS` | secret | no | JSON describing extra agents; see [Several agents](#several-agents-on-one-deployment) |
 
 For local development, put secrets in `.dev.vars` (copy `.dev.vars.example`). It's gitignored.
 
@@ -154,7 +204,8 @@ For local development, put secrets in `.dev.vars` (copy `.dev.vars.example`). It
 
 | What you see | What it means | Fix |
 |--------------|---------------|-----|
-| `Not found` on the MCP URL | Wrong or missing secret path | Check the URL ends in `/mcp/<MCP_SECRET_PATH>` exactly, and that `MCP_SECRET_PATH` isn't `CHANGE_ME` |
+| `Not found` on the MCP URL | Wrong or missing secret path | Check the URL ends in `/mcp/<MCP_SECRET_PATH>` (or the agent's `secret_path`) exactly, and that it isn't `CHANGE_ME` |
+| `Not found` for one agent only | Its `AGENTS` entry was skipped | Run `npm run tail`, reconnect, and look for an `[agents]` line saying why |
 | `Missing Access` (code 50001) | The bot can't see that channel | Give the bot's role **View Channel** on the channel or its category. Private channels need an explicit overwrite |
 | `Missing Permissions` (code 50013) | The bot can see it but isn't allowed to do that | Grant the permission, or move the bot's role higher. A bot can't manage roles or members ranked at or above its own highest role |
 | Messages come back as `[no text content]` | Message Content Intent is off | Turn it on (Setup, step 1) |
@@ -337,8 +388,8 @@ Discord's upload size limits apply (10 MB on servers without boosts).
 
 One Cloudflare Worker, three routes:
 
-- `/mcp/<secret-path>`: MCP over Streamable HTTP (JSON-RPC). Each tool call becomes one or a few Discord REST API requests. Rate limits are retried automatically for waits up to 10 seconds.
-- `/interactions`: Discord slash-command webhooks (`/vibe`), verified by signature.
+- `/mcp/<secret-path>`: MCP over Streamable HTTP (JSON-RPC). The secret picks the agent, and so the bot token. Each tool call becomes one or a few Discord REST API requests. Rate limits are retried automatically for waits up to 10 seconds.
+- `/interactions` and `/interactions/<agent>`: Discord slash-command webhooks (`/vibe`), verified by each bot's public key.
 - `/health`: public, reports the tool count.
 
 There's no database and no stored state. Authentication is the secret path, so treat the MCP URL like a password.

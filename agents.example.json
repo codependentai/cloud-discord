@@ -1,0 +1,15 @@
+{
+  "fable": {
+    "secret_path": "replace-with-openssl-rand-hex-24",
+    "discord_token": "fable-bot-token",
+    "elevenlabs_voice_id": "optional-voice-id"
+  },
+  "simon": {
+    "secret_path": "a-different-openssl-rand-hex-24",
+    "discord_token": "simon-bot-token",
+    "discord_public_key": "optional-for-vibe",
+    "anthropic_api_key": "optional-own-key",
+    "elevenlabs_api_key": "optional-own-key",
+    "elevenlabs_voice_id": "optional-voice-id"
+  }
+}
