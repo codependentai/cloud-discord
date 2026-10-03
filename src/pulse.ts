@@ -14,6 +14,13 @@ export const DEFAULT_PULSE_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 interface PulseOptions {
   ai?: AiBinding;
   model?: string;
+  // Channels the deployment never reads for a pulse, comma-separated IDs or names
+  excludeChannels?: string;
+}
+
+function channelList(value: unknown): string[] {
+  const items = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+  return items.map(v => String(v).trim().replace(/^#/, '').toLowerCase()).filter(Boolean);
 }
 
 interface Person {
@@ -96,7 +103,13 @@ export async function serverPulse(token: string, args: Record<string, unknown>, 
   const threads = threadRes.ok ? ((threadRes.data as any).threads ?? []) : [];
   const botId: string | undefined = meRes.ok ? (meRes.data as any).id : undefined;
 
+  // Excluding a channel excludes its threads too
+  const excluded = new Set([...channelList(options.excludeChannels), ...channelList(args.exclude_channels)]);
+  const isExcluded = (c: any) => [c.id, c.name?.toLowerCase(), c.parent_id, names.get(c.parent_id)?.toLowerCase()]
+    .some(key => key && excluded.has(key));
+
   const active = [...channels.filter(c => [0, 2, 5].includes(c.type)), ...threads]
+    .filter(c => !isExcluded(c))
     .filter(c => c.last_message_id && BigInt(c.last_message_id) > sinceId)
     .sort((a, b) => (BigInt(b.last_message_id) > BigInt(a.last_message_id) ? 1 : -1));
   const since = new Date(sinceMs).toISOString();
@@ -214,7 +227,7 @@ async function moodReading(all: Seen[], options: PulseOptions): Promise<string> 
     lines.unshift(line);
   }
   try {
-    const result = await options.ai.run(model, {
+    const input = {
       messages: [
         {
           role: 'system',
@@ -223,7 +236,15 @@ async function moodReading(all: Seen[], options: PulseOptions): Promise<string> 
         { role: 'user', content: lines.join('\n') },
       ],
       max_tokens: 300,
-    });
+    };
+    // Reasoning models (the default included) can spend the whole budget thinking; ask them not to.
+    // A model that rejects the setting gets the plain request instead.
+    let result: unknown;
+    try {
+      result = await options.ai.run(model, { ...input, chat_template_kwargs: { enable_thinking: false } });
+    } catch {
+      result = await options.ai.run(model, input);
+    }
     const text = aiText(result)?.trim();
     if (!text) return `## Mood (${model})\n(The model returned nothing usable.)`;
     return `## Mood (a reading by ${model}, not a fact)\n${text}`;

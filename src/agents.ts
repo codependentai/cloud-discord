@@ -18,6 +18,8 @@ export interface AgentEnv {
   // Workers AI, only for discord_server_pulse's optional mood reading
   AI?: AiBinding;
   PULSE_MODEL?: string;
+  // Comma-separated channel IDs or names discord_server_pulse never reads, for every agent
+  PULSE_EXCLUDE_CHANNELS?: string;
 }
 
 export interface Agent {

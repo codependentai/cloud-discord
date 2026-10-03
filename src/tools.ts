@@ -145,6 +145,7 @@ export const DISCORD_TOOLS = [
         guild_id: { type: 'string', description: 'The guild/server ID' },
         since: { type: 'string', description: 'How far back: a relative time like 12h, 1d, 7d, or an ISO time', default: '24h' },
         mood: { type: 'boolean', description: 'Add a short mood and what-people-are-working-on reading from a Workers AI model (needs the AI binding)', default: false },
+        exclude_channels: { type: 'array', items: { type: 'string' }, description: 'Channel IDs or names to leave out (their threads too), e.g. private or admin channels. Added to any the deployment already excludes.' },
         per_channel: { type: 'number', description: 'Max messages to read per channel (1-300)', default: 100 },
         max_channels: { type: 'number', description: 'Max channels/threads to include, busiest-recent first (1-50)', default: 25 },
       },
@@ -992,6 +993,7 @@ export interface ToolExtras {
   elevenLabsVoiceId?: string;
   ai?: AiBinding;
   pulseModel?: string;
+  pulseExcludeChannels?: string;
 }
 
 // MCP content blocks a tool can return instead of plain text
@@ -1181,7 +1183,7 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
     }
 
     case 'discord_server_pulse': {
-      return serverPulse(token, args, { ai: extras?.ai, model: extras?.pulseModel });
+      return serverPulse(token, args, { ai: extras?.ai, model: extras?.pulseModel, excludeChannels: extras?.pulseExcludeChannels });
     }
 
     case 'discord_send_typing': {
