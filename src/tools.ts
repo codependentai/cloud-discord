@@ -138,13 +138,14 @@ export const DISCORD_TOOLS = [
   },
   {
     name: 'discord_server_pulse',
-    description: 'A picture of a whole server over a time window instead of its messages: who has been around and where, who replied to or mentioned whom (and who never got a reply back), the busiest channels, and open loops: people addressed who have not said anything in that channel since. Set mood to add a short reading of the mood and what people are working on, written by a Workers AI model and labelled as a reading. Use it to see what the community is doing, find conversations to join, or write a digest; use discord_catch_up when you need the messages themselves.',
+    description: 'A picture of a whole server over a time window instead of its messages: who has been around and where, who replied to or mentioned whom (and who never got a reply back), the busiest channels, open loops (people addressed who have not said anything in that channel since), and things said to the whole room that nobody has answered. Set mood to add a short reading of the mood and what people are working on, written by a Workers AI model and labelled as a reading. Use it to see what the community is doing, find conversations to join, or write a digest; use discord_catch_up when you need the messages themselves.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         guild_id: { type: 'string', description: 'The guild/server ID' },
         since: { type: 'string', description: 'How far back: a relative time like 12h, 1d, 7d, or an ISO time', default: '24h' },
         mood: { type: 'boolean', description: 'Add a short mood and what-people-are-working-on reading from a Workers AI model (needs the AI binding)', default: false },
+        quiet_hours: { type: 'number', description: 'How long a message said to the room must sit unanswered before it is listed (0-72 hours)', default: 2 },
         exclude_channels: { type: 'array', items: { type: 'string' }, description: 'Channel IDs or names to leave out (their threads too), e.g. private or admin channels. Added to any the deployment already excludes.' },
         per_channel: { type: 'number', description: 'Max messages to read per channel (1-300)', default: 100 },
         max_channels: { type: 'number', description: 'Max channels/threads to include, busiest-recent first (1-50)', default: 25 },

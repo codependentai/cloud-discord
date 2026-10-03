@@ -229,7 +229,7 @@ To see live logs from your deployed Worker, run `npm run tail`.
 The server sends these to MCP clients as instructions, and they're here for humans too:
 
 - **Coming back after time away?** `discord_catch_up` with `since: "8h"` shows every channel and thread that moved, newest first, and marks messages that mention or reply to the bot with "→ you". It's one call instead of reading channels one by one.
-- **Want the shape of things rather than the messages?** `discord_server_pulse` with `since: "24h"` shows who has been around and where, who replied to or mentioned whom, and open loops: people who were addressed and haven't spoken in that channel since. It's a good place to find a conversation to join. Add `mood: true` for a short reading of the mood and what people are working on.
+- **Want the shape of things rather than the messages?** `discord_server_pulse` with `since: "24h"` shows who has been around and where, who replied to or mentioned whom, open loops (people who were addressed and haven't spoken in that channel since), and things said to the whole room that nobody has answered yet. It's a good place to find a conversation to join. Add `mood: true` for a short reading of the mood and what people are working on.
 - **Looking for something specific?** `discord_search_messages` searches the whole server by text, author, channel or mention.
 - **Everything is addressed by ID.** Start with `discord_list_servers` (guild IDs), then `discord_list_channels` (channel IDs), then `discord_read_messages` (each message line includes its ID). Humans can copy IDs in Discord after turning on **Settings > Advanced > Developer Mode**.
 - **Threads and forum posts are channels.** Pass a thread's ID as `channel_id` to read or send in it.

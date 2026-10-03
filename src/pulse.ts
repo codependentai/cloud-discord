@@ -128,7 +128,12 @@ export async function serverPulse(token: string, args: Record<string, unknown>, 
   const where: string[] = [];
   const unreadable: string[] = [];
   const openLoops: string[] = [];
+  const toTheRoom: { bot: boolean; at: string; line: string }[] = [];
   const all: Seen[] = [];
+  // Said to the room counts as unanswered only once it has had time to be answered
+  const quietMs = Math.min(Math.max(Number(args.quiet_hours ?? 2), 0), 72) * 3_600_000;
+  // A thread started from a message has the message's ID, and talking there is an answer
+  const threadIds = new Set(threads.map((t: any) => t.id));
 
   for (const ch of fetched) {
     if (ch.error) { unreadable.push(`${ch.label} (${ch.error})`); continue; }
@@ -166,6 +171,19 @@ export async function serverPulse(token: string, args: Record<string, unknown>, 
         // Open loop: someone was addressed here and hasn't said anything in this channel since
         const answered = seen.slice(i + 1).some(later => later.authorId === t);
         if (!answered) openLoops.push(`${s.at}\u0000- ${s.author} → ${people.get(t)?.name ?? t}${t === botId ? ' (you)' : ''} in ${ch.label}, ${shortTime(s.at)}: "${clip(s.text, 140)}" (message ${s.id})`);
+      }
+
+      // Said to the room: nobody addressed, and nobody else has spoken in this channel since
+      const quietLongEnough = Date.now() - Date.parse(s.at) >= quietMs;
+      if (s.targets.length === 0 && quietLongEnough && !threadIds.has(s.id)
+        && !seen.slice(i + 1).some(later => later.authorId !== s.authorId)) {
+        const reactions = (talk[i].reactions ?? []).reduce((n: number, r: any) => n + (r.count ?? 0), 0);
+        const reacted = reactions ? `, ${reactions} reaction(s)` : '';
+        toTheRoom.push({
+          bot: person.bot,
+          at: s.at,
+          line: `- ${s.author}${person.bot ? ' [bot]' : ''}${s.authorId === botId ? ' (you)' : ''} in ${ch.label}, ${shortTime(s.at)}${reacted}: "${clip(s.text, 140)}" (message ${s.id})`,
+        });
       }
     }
     all.push(...seen);
@@ -205,6 +223,15 @@ export async function serverPulse(token: string, args: Record<string, unknown>, 
   out.push('', '## Open loops (addressed, no word from them in that channel since)');
   if (openLoops.length === 0) out.push('- None.');
   else out.push(...openLoops.sort().reverse().slice(0, 15).map(l => l.split('\u0000')[1]));
+
+  out.push('', '## Said to the room, no reply yet (nobody else has spoken in that channel since)');
+  if (toTheRoom.length === 0) out.push('- None.');
+  else {
+    // People before bots: a person left unanswered matters more than a bot's own post
+    toTheRoom.sort((a, b) => (a.bot === b.bot ? (a.at < b.at ? 1 : -1) : a.bot ? 1 : -1));
+    out.push(...toTheRoom.slice(0, 10).map(r => r.line));
+    if (toTheRoom.length > 10) out.push(`- …and ${toTheRoom.length - 10} more.`);
+  }
 
   if (args.mood) {
     out.push('', await moodReading(all, options));
