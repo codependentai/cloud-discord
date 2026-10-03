@@ -3,9 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2025-02-14"
 
 [vars]
-# Secret path for MCP endpoint auth — your MCP URL will be: https://<worker>.workers.dev/mcp/<this-value>
-# Generate one with: openssl rand -base64 24
+# Secret path for MCP endpoint auth. Your MCP URL will be: https://<worker>.workers.dev/mcp/<this-value>
+# Generate one with: openssl rand -hex 24
+# The server returns 404 for every MCP request while this is CHANGE_ME.
+# Public fork? Delete this line and use `npx wrangler secret put MCP_SECRET_PATH` instead.
 MCP_SECRET_PATH = "CHANGE_ME"
 
-# Your Discord application's public key (from https://discord.com/developers/applications)
+# Your Discord application's public key (Developer Portal > General Information).
+# Only needed for the /vibe slash command.
 DISCORD_PUBLIC_KEY = "CHANGE_ME"

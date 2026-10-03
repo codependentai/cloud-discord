@@ -1,59 +1,38 @@
 # Cloud Discord
 
-A full-featured Discord MCP (Model Context Protocol) server that runs on Cloudflare Workers. Gives AI agents complete admin control over Discord servers — 59 tools covering messaging, moderation, forums, roles, files, voice notes, and more.
+A Discord MCP (Model Context Protocol) server that runs on Cloudflare Workers. It gives an AI agent a Discord bot account to work through: 59 tools for messaging, moderation, forums, roles, files, voice notes and more.
 
-Deploy once, connect from any MCP-compatible client (Claude Code, Claude Desktop, Cursor, etc.).
+You deploy it once to your own Cloudflare account and connect any MCP client to its URL (Claude Code, Claude Desktop, claude.ai, Cursor, and others). There's no database and no server to keep running.
 
-## Features
+**What you need:** a Cloudflare account (the free tier works), Node.js 18+, and a Discord server where you can add a bot. Setup takes about 15 minutes.
 
-**59 tools** across 12 categories:
+## Contents
 
-| Category | Tools | What You Can Do |
-|----------|-------|----------------|
-| **Messaging** | 8 | Send, edit, delete, bulk delete, read history, send embeds, read/send DMs |
-| **Moderation** | 4 | Kick, ban, unban, timeout members |
-| **Roles** | 7 | Create, edit, delete, assign, remove roles, list member roles |
-| **Channels** | 6 | Create, edit, delete channels, set slowmode, set permissions, list all |
-| **Threads** | 3 | Create, manage (archive/lock), delete threads |
-| **Forums** | 9 | Create/edit/list posts, manage tags, set layout/sort/guidelines |
-| **Reactions** | 3 | Add, remove, get reactions |
-| **Pins** | 3 | Pin, unpin, list pinned messages |
-| **Files** | 2 | Send files to channels or DMs (via URL or base64) |
-| **Voice** | 1 | Text-to-speech voice notes via ElevenLabs (optional) |
-| **Server** | 4 | Guild info, audit log, list servers, member list |
-| **Invites** | 3 | Create, list, delete invites |
-| **Polls** | 1 | Create native Discord polls |
-
-Plus:
-- `/vibe` slash command — AI-powered channel vibe check (requires Anthropic API key)
-- Direct file upload endpoint — send files from your machine without base64 encoding
-- Secret-path authentication — your MCP endpoint is only accessible with your secret URL
-- Rate limit handling with automatic retry
-
-## Prerequisites
-
-- A [Cloudflare account](https://dash.cloudflare.com/sign-up) (free tier works)
-- [Node.js](https://nodejs.org/) 18+
-- A Discord bot with appropriate permissions
+- [Setup](#setup)
+- [Configuration reference](#configuration-reference)
+- [Troubleshooting](#troubleshooting)
+- [Tips for agents](#tips-for-agents)
+- [Optional features](#optional-features): `/vibe`, voice notes, direct file upload
+- [Tool reference](#tool-reference)
+- [Development](#development)
 
 ## Setup
 
-### 1. Create a Discord Bot
+### 1. Create the Discord bot
 
-1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click **New Application**, give it a name
-3. Go to the **Bot** tab:
-   - Click **Reset Token** and save the token — you'll need it later
-   - Enable **Message Content Intent** under Privileged Gateway Intents
-4. Go to the **General Information** tab:
-   - Copy the **Application ID** (you'll need this for the `/vibe` command)
-   - Copy the **Public Key** (you'll need this for `wrangler.toml`)
-5. Go to **OAuth2 > URL Generator**:
-   - Select scopes: `bot`, `applications.commands`
-   - Select bot permissions: `Administrator` (or select individual permissions you need)
-   - Copy the generated URL and open it in your browser to invite the bot to your server
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
+2. On the **Bot** tab:
+   - Click **Reset Token** and copy the token. Discord shows it once; you'll need it in step 4.
+   - Under **Privileged Gateway Intents**, turn on:
+     - **Message Content Intent**. Without it, messages the bot reads come back with empty text.
+     - **Server Members Intent**. Without it, `discord_get_guild_members` fails.
+3. On the **General Information** tab, copy the **Public Key**. You need it in step 3, and it's only used by the optional `/vibe` command.
+4. On **OAuth2 > URL Generator**:
+   - Scopes: `bot` and `applications.commands`
+   - Bot permissions: `Administrator` is the simplest choice. For a narrower bot, pick only what you'll use: View Channels, Send Messages, Read Message History, Attach Files, Add Reactions, Manage Messages, Manage Threads, Create Polls, and the moderation and role permissions you need.
+   - Open the generated URL and invite the bot to your server.
 
-### 2. Clone and Install
+### 2. Clone and install
 
 ```bash
 git clone https://github.com/codependentai/cloud-discord.git
@@ -61,244 +40,323 @@ cd cloud-discord
 npm install
 ```
 
-### 3. Configure
+### 3. Set your secret path and public key
 
-Edit `wrangler.toml`:
+Your MCP URL contains a secret path, and anyone who has the URL can use every tool. Generate a long random value:
+
+```bash
+openssl rand -hex 24
+```
+
+Then edit `wrangler.toml`:
 
 ```toml
 [vars]
-# Generate a random secret: openssl rand -base64 24
-MCP_SECRET_PATH = "your-random-secret-here"
-
-# From Discord Developer Portal > General Information > Public Key
-DISCORD_PUBLIC_KEY = "your-public-key-here"
+MCP_SECRET_PATH = "the-value-you-generated"
+DISCORD_PUBLIC_KEY = "your-public-key"   # or leave CHANGE_ME if you won't use /vibe
 ```
 
-### 4. Add Secrets
+> **Public fork?** Don't commit a real `MCP_SECRET_PATH`. Delete that line from `wrangler.toml` and store it as a secret instead: `npx wrangler secret put MCP_SECRET_PATH`.
 
-These are stored securely in Cloudflare — they never appear in your code:
+Until `MCP_SECRET_PATH` is set to a real value, the server answers every MCP request with 404.
+
+### 4. Add secrets
+
+Secrets are stored encrypted in Cloudflare and never go in your code. Each command prompts you to paste the value.
 
 ```bash
-# Required — your Discord bot token
-npx wrangler secret put DISCORD_BOT_TOKEN
-# Paste your bot token when prompted
-
-# Optional — needed for the /vibe slash command
-npx wrangler secret put ANTHROPIC_API_KEY
-
-# Optional — needed for voice notes (discord_send_voice_note)
-npx wrangler secret put ELEVENLABS_API_KEY
+npx wrangler secret put DISCORD_BOT_TOKEN      # required
+npx wrangler secret put ANTHROPIC_API_KEY      # optional, for /vibe
+npx wrangler secret put ELEVENLABS_API_KEY     # optional, for voice notes
+npx wrangler secret put ELEVENLABS_VOICE_ID    # optional, default voice for voice notes
 ```
+
+The first `wrangler` command asks you to log in to Cloudflare in your browser.
 
 ### 5. Deploy
 
 ```bash
-npx wrangler deploy
+npm run deploy
 ```
 
-Your MCP server is now live at:
-```
-https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret-path>
+Wrangler prints your Worker's address, like `https://cloud-discord.<your-subdomain>.workers.dev`. Your MCP URL is that address plus `/mcp/<your-secret-path>`.
+
+### 6. Check it works
+
+```bash
+# Should print {"status":"ok","tools":59}
+curl https://cloud-discord.<your-subdomain>.workers.dev/health
+
+# Should print a JSON result naming "cloud-discord"
+curl https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret-path> \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 ```
 
-### 6. Connect to Your MCP Client
+If `/health` works but the second command returns `Not found`, the secret path in the URL doesn't match `MCP_SECRET_PATH`.
 
-Add the server to your MCP client's configuration. For example, in Claude Code's `.mcp.json`:
+### 7. Connect your MCP client
+
+Use your full MCP URL: `https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret-path>`.
+
+**Claude Code.** From your project folder:
+
+```bash
+claude mcp add --transport http discord https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret-path>
+```
+
+Add `--scope user` to make it available in all your projects. Or put it in `.mcp.json` yourself:
 
 ```json
 {
   "mcpServers": {
     "discord": {
-      "type": "url",
+      "type": "http",
       "url": "https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret-path>"
     }
   }
 }
 ```
 
-For Claude Desktop, add it to `claude_desktop_config.json` under `mcpServers` with the same format.
+If you commit `.mcp.json`, the secret URL goes with it. For a shared repo, add the server with `--scope user` instead.
 
-## Optional: Register the /vibe Slash Command
+**claude.ai and Claude Desktop.** Go to **Settings > Connectors > Add custom connector** and paste the URL. Leave the OAuth fields empty; the secret path is the authentication. Custom connectors depend on your plan.
 
-The `/vibe` command lets anyone in your Discord server run an AI-powered vibe check on the current channel. It reads the last 20 messages and summarizes what's happening.
+**Claude Desktop through its config file.** `claude_desktop_config.json` only starts local (stdio) servers, so bridge to the URL with [`mcp-remote`](https://www.npmjs.com/package/mcp-remote):
 
-Requires `ANTHROPIC_API_KEY` to be set.
+```json
+{
+  "mcpServers": {
+    "discord": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret-path>"]
+    }
+  }
+}
+```
+
+**Other clients** (Cursor and so on): add a remote or "Streamable HTTP" MCP server with the same URL.
+
+## Configuration reference
+
+| Name | Kind | Required | What it's for |
+|------|------|----------|---------------|
+| `DISCORD_BOT_TOKEN` | secret | yes | The bot's token from the Developer Portal |
+| `MCP_SECRET_PATH` | var or secret | yes | The secret part of your MCP URL. The server returns 404 while it's unset or `CHANGE_ME` |
+| `DISCORD_PUBLIC_KEY` | var | for `/vibe` | Verifies that interaction requests really come from Discord |
+| `ANTHROPIC_API_KEY` | secret | for `/vibe` | Writes the vibe summary |
+| `ELEVENLABS_API_KEY` | secret | for voice notes | Text-to-speech |
+| `ELEVENLABS_VOICE_ID` | secret | no | Default voice, so `voice_id` can be left out of each call |
+
+For local development, put secrets in `.dev.vars` (copy `.dev.vars.example`). It's gitignored.
+
+## Troubleshooting
+
+| What you see | What it means | Fix |
+|--------------|---------------|-----|
+| `Not found` on the MCP URL | Wrong or missing secret path | Check the URL ends in `/mcp/<MCP_SECRET_PATH>` exactly, and that `MCP_SECRET_PATH` isn't `CHANGE_ME` |
+| `Missing Access` (code 50001) | The bot can't see that channel | Give the bot's role **View Channel** on the channel or its category. Private channels need an explicit overwrite |
+| `Missing Permissions` (code 50013) | The bot can see it but isn't allowed to do that | Grant the permission, or move the bot's role higher. A bot can't manage roles or members ranked at or above its own highest role |
+| Messages come back as `[no text content]` | Message Content Intent is off | Turn it on (Setup, step 1) |
+| `discord_get_guild_members` fails | Server Members Intent is off | Turn it on (Setup, step 1) |
+| `Unknown Channel` / `Unknown Message` (10003 / 10008) | Wrong ID, or it was deleted | IDs are long numbers; re-list to get fresh ones |
+| `Cannot send messages to this user` (50007) | The user has DMs closed or shares no server with the bot | Nothing the bot can do; message them in a channel instead |
+| `Rate limited; retry after Ns` | Discord asked the bot to slow down for longer than the server waits | Wait that long and try again |
+| Voice note: `ElevenLabs API key not configured` | `ELEVENLABS_API_KEY` isn't set | `npx wrangler secret put ELEVENLABS_API_KEY` |
+
+To see live logs from your deployed Worker, run `npm run tail`.
+
+## Tips for agents
+
+The server sends these to MCP clients as instructions, and they're here for humans too:
+
+- **Everything is addressed by ID.** Start with `discord_list_servers` (guild IDs), then `discord_list_channels` (channel IDs), then `discord_read_messages` (each message line includes its ID). Humans can copy IDs in Discord after turning on **Settings > Advanced > Developer Mode**.
+- **Threads and forum posts are channels.** Pass a thread's ID as `channel_id` to read or send in it.
+- **Custom emoji** can be passed as `<:name:id>` or `name:id`; Unicode emoji are passed as-is.
+- **Tools are annotated.** Read-only tools are marked `readOnlyHint`, and tools that delete, ban, kick, or change permissions are marked `destructiveHint`, so clients can ask before running them.
+- **Images come back as images.** `discord_fetch_image` returns the picture itself, not a link, so a vision-capable model can look at it.
+
+## Optional features
+
+### `/vibe` slash command
+
+Anyone in your server can type `/vibe` to get a one-paragraph read on what the channel is talking about and its mood. It reads the last 20 messages and summarizes them with Claude.
+
+1. Set `DISCORD_PUBLIC_KEY` (step 3) and `ANTHROPIC_API_KEY` (step 4), and deploy.
+2. Register the command once. The Application ID is on the Developer Portal's **General Information** tab:
+   ```bash
+   DISCORD_APP_ID=your_app_id DISCORD_BOT_TOKEN=your_token npx tsx src/register-commands.ts
+   ```
+3. In the Developer Portal, set **Interactions Endpoint URL** to `https://cloud-discord.<your-subdomain>.workers.dev/interactions` and save. Discord checks the endpoint right away, so the Worker must already be deployed with the right public key.
+
+### Voice notes
+
+`discord_send_voice_note` turns text into speech with [ElevenLabs](https://elevenlabs.io/) and posts it as an audio file.
+
+1. Get an ElevenLabs API key and set it: `npx wrangler secret put ELEVENLABS_API_KEY`
+2. Find a voice ID in the [Voice Lab](https://elevenlabs.io/app/voice-lab). Either set it as the default (`npx wrangler secret put ELEVENLABS_VOICE_ID`) or pass `voice_id` on each call.
+
+Without the API key, only this tool returns an error; everything else works normally.
+
+### Direct file upload
+
+For local files too big to pass through an MCP tool as base64 (audio especially), post them straight to the upload endpoint:
 
 ```bash
-DISCORD_APP_ID=your_app_id DISCORD_BOT_TOKEN=your_token npx tsx src/register-commands.ts
-```
-
-Then in Discord Developer Portal, set the **Interactions Endpoint URL** to:
-```
-https://cloud-discord.<your-subdomain>.workers.dev/interactions
-```
-
-## Optional: Voice Notes
-
-The `discord_send_voice_note` tool generates speech using [ElevenLabs](https://elevenlabs.io/) and sends it as an audio file to Discord.
-
-1. Sign up at [ElevenLabs](https://elevenlabs.io/) and get an API key
-2. Add the secret: `npx wrangler secret put ELEVENLABS_API_KEY`
-3. Find your voice ID in the [Voice Lab](https://elevenlabs.io/app/voice-lab)
-4. Optionally set a default voice: `npx wrangler secret put ELEVENLABS_VOICE_ID`
-5. Use the tool with `text` (and `voice_id` if you didn't set a default)
-
-If `ELEVENLABS_API_KEY` is not set, the tool will return an error when called but won't affect any other tools.
-
-## Direct File Upload
-
-For sending local files (images, audio, documents) without base64 encoding, use the direct upload endpoint:
-
-```bash
-# Send to a channel
+# To a channel
 curl -F "channel_id=CHANNEL_ID" \
      -F "file=@/path/to/file.mp3" \
      -F "message=Optional message" \
-     https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret>/upload
+     https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret-path>/upload
 
-# Send as DM
+# As a DM
 curl -F "user_id=USER_ID" \
      -F "file=@/path/to/image.png" \
-     https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret>/upload
+     https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret-path>/upload
 ```
 
-This is useful when the MCP tool's base64 parameter would be too large (e.g., audio files).
+Discord's upload size limits apply (10 MB on servers without boosts).
 
-## Tool Reference
+## Tool reference
+
+59 tools. Each MCP client also gets the full parameter list for every tool.
+
+| Category | Count |
+|----------|-------|
+| [Messaging](#messaging) | 8 |
+| [Reactions & pins](#reactions--pins) | 6 |
+| [Channels](#channels) | 7 |
+| [Threads](#threads) | 3 |
+| [Forums](#forums) | 10 |
+| [Roles](#roles) | 7 |
+| [Members & moderation](#members--moderation) | 7 |
+| [Server](#server) | 2 |
+| [Invites & polls](#invites--polls) | 4 |
+| [Files, images & voice](#files-images--voice) | 5 |
 
 ### Messaging
 | Tool | Description |
 |------|-------------|
-| `discord_read_messages` | Read channel message history (1-100 messages, page with `before`/`after`) |
+| `discord_read_messages` | Read channel history (1-100 messages, with IDs; page with `before`/`after`) |
 | `discord_read_dm_messages` | Read DM history with a user |
 | `discord_send_message` | Send a message, optionally as a reply |
 | `discord_send_dm` | Send a direct message to a user |
-| `discord_edit_message` | Edit a bot message |
+| `discord_edit_message` | Edit one of the bot's own messages |
 | `discord_delete_message` | Delete a message |
-| `discord_bulk_delete_messages` | Delete 2-100 messages at once (must be <14 days old) |
+| `discord_bulk_delete_messages` | Delete 2-100 messages at once (each under 14 days old) |
 | `discord_send_embed` | Send a rich embed with title, fields, images, colors |
 
-### Moderation
+### Reactions & pins
 | Tool | Description |
 |------|-------------|
-| `discord_kick_member` | Kick a member from the server |
-| `discord_ban_member` | Ban a member, optionally delete their recent messages |
-| `discord_unban_member` | Unban a user |
-| `discord_timeout_member` | Timeout (mute) a member for up to 28 days |
-
-### Roles
-| Tool | Description |
-|------|-------------|
-| `discord_list_roles` | List all roles in a server |
-| `discord_create_role` | Create a role with name, color, hoist, mentionable |
-| `discord_edit_role` | Edit role name or color |
-| `discord_delete_role` | Delete a role |
-| `discord_assign_role` | Give a role to a member |
-| `discord_remove_role` | Remove a role from a member |
-| `discord_get_member_roles` | Get all roles for a member |
+| `discord_add_reaction` | Add an emoji reaction |
+| `discord_remove_reaction` | Remove the bot's reaction, or someone else's |
+| `discord_get_message_reactions` | Get reaction counts on a message |
+| `discord_pin_message` | Pin a message |
+| `discord_unpin_message` | Unpin a message |
+| `discord_get_pinned_messages` | List pinned messages |
 
 ### Channels
 | Tool | Description |
 |------|-------------|
-| `discord_list_channels` | List all channels organized by category |
-| `discord_list_servers` | List all servers the bot is in |
-| `discord_create_channel` | Create text, voice, category, or forum channels |
+| `discord_list_servers` | List the servers the bot is in |
+| `discord_list_channels` | List a server's channels by category |
+| `discord_create_channel` | Create a text, voice, category, or forum channel |
 | `discord_edit_channel` | Edit name, topic, NSFW, position, category |
 | `discord_delete_channel` | Delete a channel |
 | `discord_set_slowmode` | Set slowmode (0-21600 seconds) |
-| `discord_set_channel_permissions` | Set permission overwrites for roles/users |
+| `discord_set_channel_permissions` | Set a permission overwrite for a role or member |
 
 ### Threads
 | Tool | Description |
 |------|-------------|
 | `discord_create_thread` | Create a thread, optionally from a message |
-| `discord_manage_thread` | Archive, unarchive, lock, unlock threads |
+| `discord_manage_thread` | Archive, unarchive, lock, unlock |
 | `discord_delete_thread` | Delete a thread |
 
 ### Forums
 | Tool | Description |
 |------|-------------|
-| `discord_create_forum_post` | Create a forum post with optional tags |
-| `discord_edit_forum_post` | Edit title, archive, lock, pin, change tags |
-| `discord_list_forum_posts` | List active posts in a forum |
-| `discord_list_archived_forum_posts` | List archived/closed posts |
-| `discord_get_forum_tags` | Get available tags |
+| `discord_create_forum_post` | Create a post with optional tags |
+| `discord_edit_forum_post` | Rename, archive, lock, pin, change tags |
+| `discord_list_forum_posts` | List active posts |
+| `discord_list_archived_forum_posts` | List archived posts |
+| `discord_get_forum_tags` | List available tags |
 | `discord_create_forum_tag` | Add a tag (max 20 per forum) |
-| `discord_edit_forum_tag` | Edit a tag's name, emoji, moderated status |
+| `discord_edit_forum_tag` | Edit a tag's name, emoji, or moderated status |
 | `discord_delete_forum_tag` | Delete a tag |
-| `discord_set_forum_default_reaction` | Set default reaction emoji for new posts |
-| `discord_set_forum_settings` | Configure layout, sort order, guidelines, require tags |
+| `discord_set_forum_default_reaction` | Set the default reaction for new posts |
+| `discord_set_forum_settings` | Layout, sort order, guidelines, required tags |
 
-### Reactions & Pins
+### Roles
 | Tool | Description |
 |------|-------------|
-| `discord_add_reaction` | Add an emoji reaction |
-| `discord_remove_reaction` | Remove a reaction (own or others) |
-| `discord_get_message_reactions` | Get all reactions on a message |
-| `discord_pin_message` | Pin a message |
-| `discord_unpin_message` | Unpin a message |
-| `discord_get_pinned_messages` | List all pinned messages |
+| `discord_list_roles` | List roles |
+| `discord_create_role` | Create a role with name, color, hoist, mentionable |
+| `discord_edit_role` | Edit a role's name or color |
+| `discord_delete_role` | Delete a role |
+| `discord_assign_role` | Give a member a role |
+| `discord_remove_role` | Take a role from a member |
+| `discord_get_member_roles` | List a member's roles |
 
-### Files & Voice
+### Members & moderation
 | Tool | Description |
 |------|-------------|
-| `discord_send_file` | Send a file via URL or base64 |
-| `discord_send_dm_file` | Send a file as DM via URL or base64 |
-| `discord_send_voice_note` | Generate TTS audio and send (requires ElevenLabs) |
+| `discord_get_guild_members` | List members (needs Server Members Intent) |
+| `discord_get_user_info` | Username, display name, avatar |
+| `discord_change_nickname` | Change the bot's own nickname |
+| `discord_kick_member` | Kick a member, with an audit-log reason |
+| `discord_ban_member` | Ban a user, optionally deleting recent messages |
+| `discord_unban_member` | Unban a user |
+| `discord_timeout_member` | Timeout a member for up to 28 days, or lift it |
 
-### Server & Members
+### Server
 | Tool | Description |
 |------|-------------|
-| `discord_get_guild_info` | Server details: name, members, boosts, verification |
-| `discord_get_audit_log` | View audit log, filter by action type or user |
-| `discord_get_guild_members` | List server members |
-| `discord_get_user_info` | Get user details |
-| `discord_change_nickname` | Change the bot's nickname |
+| `discord_get_guild_info` | Name, member counts, boosts, verification level |
+| `discord_get_audit_log` | Audit log, filterable by action type or user |
 
-### Invites & Polls
+### Invites & polls
 | Tool | Description |
 |------|-------------|
-| `discord_create_invite` | Create a channel invite with expiry and use limits |
-| `discord_list_invites` | List all server invites |
+| `discord_create_invite` | Create an invite with expiry and use limits |
+| `discord_list_invites` | List invites |
 | `discord_delete_invite` | Revoke an invite |
-| `discord_create_poll` | Create a native Discord poll (2-10 options) |
+| `discord_create_poll` | Create a native poll (2-10 answers) |
 
-### Images
+### Files, images & voice
 | Tool | Description |
 |------|-------------|
-| `discord_fetch_image` | Fetch a message attachment as image content the model can see |
-| `discord_fetch_dm_image` | Fetch a DM attachment as image content the model can see |
+| `discord_send_file` | Send a file from a URL or base64 |
+| `discord_send_dm_file` | Send a file as a DM |
+| `discord_fetch_image` | Fetch an image attachment so the model can see it |
+| `discord_fetch_dm_image` | Same, from a DM |
+| `discord_send_voice_note` | Generate speech and send it (needs ElevenLabs) |
 
-## Architecture
+## How it works
 
-This is a single Cloudflare Worker (~330 KB) that:
+One Cloudflare Worker, three routes:
 
-1. Receives MCP JSON-RPC requests at `/mcp/<secret-path>`
-2. Translates tool calls into Discord REST API requests
-3. Returns formatted results to the MCP client
+- `/mcp/<secret-path>`: MCP over Streamable HTTP (JSON-RPC). Each tool call becomes one or a few Discord REST API requests. Rate limits are retried automatically for waits up to 10 seconds.
+- `/interactions`: Discord slash-command webhooks (`/vibe`), verified by signature.
+- `/health`: public, reports the tool count.
 
-No database, no state, no containers. Auth is handled by the secret path in the URL — anyone with the URL can use all tools, so treat it like an API key. If `MCP_SECRET_PATH` is unset or still `CHANGE_ME`, every MCP path returns 404.
-
-The `/vibe` slash command handles Discord interactions at `/interactions` using signature verification.
+There's no database and no stored state. Authentication is the secret path, so treat the MCP URL like a password.
 
 ## Development
 
 ```bash
-# Run locally
-npx wrangler dev
-
-# Type check
-npx tsc --noEmit
-
-# Deploy
-npx wrangler deploy
+cp .dev.vars.example .dev.vars   # then fill in your token
+npm run dev                      # local server at http://localhost:8787
+npm run typecheck
+npm run deploy
 ```
+
+To add a tool, add its definition to `DISCORD_TOOLS` and a matching `case` in `handleDiscordTool`, both in `src/tools.ts`. See [AGENTS.md](AGENTS.md) for more on the layout.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-Built by [Codependent AI](https://codependentai.io).
+MIT, see [LICENSE](LICENSE).
 
 ## Support
 

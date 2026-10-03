@@ -1,7 +1,7 @@
 // Cloud Discord — Cloudflare Worker providing Discord REST API as MCP tools
 // Secret-path authenticated: /mcp/<MCP_SECRET_PATH>
 
-import { DISCORD_TOOLS, handleDiscordTool } from './tools';
+import { DISCORD_TOOLS, handleDiscordTool, toolAnnotations } from './tools';
 import { discordFetch, discordFetchMultipart, formatMessage } from './discord';
 import Anthropic from '@anthropic-ai/sdk';
 import nacl from 'tweetnacl';
@@ -51,6 +51,13 @@ const SERVER_INFO = {
 
 // Protocol versions this server can speak; the newest is offered when the client asks for one we don't know
 const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+
+// Sent to clients on initialize; agents read this before picking tools
+const SERVER_INSTRUCTIONS = `Discord tools acting as one bot account.
+- Every ID (guild, channel, message, user, role) is a numeric string. Find them with discord_list_servers, then discord_list_channels, then discord_read_messages; message lines include message IDs.
+- Threads and forum posts are channels: pass a thread ID as channel_id to read or send in them.
+- The bot can only see and act where its roles allow. "Missing Access" (50001) means it cannot see that channel; "Missing Permissions" (50013) means it lacks the permission or its role is too low.
+- Delete, ban, kick and bulk-delete cannot be undone.`;
 
 const SERVER_CAPABILITIES = {
   tools: {},
@@ -321,6 +328,7 @@ export default {
               : SUPPORTED_PROTOCOL_VERSIONS[0],
             serverInfo: SERVER_INFO,
             capabilities: SERVER_CAPABILITIES,
+            instructions: SERVER_INSTRUCTIONS,
           };
           break;
         }
@@ -335,6 +343,7 @@ export default {
               name: t.name,
               description: t.description,
               inputSchema: t.inputSchema,
+              annotations: toolAnnotations(t.name),
             })),
           };
           break;
