@@ -1,6 +1,7 @@
 // Discord MCP Tool definitions and REST API handlers
 
 import { describeOggOpus } from './voice';
+import { serverPulse, type AiBinding } from './pulse';
 import { discordFetch, discordFetchMultipart, formatMessage, fetchImageAsBase64, parseSince, snowflakeFromTime, splitMessage, MESSAGE_LIMIT } from './discord';
 
 // ============ TOOL DEFINITIONS ============
@@ -131,6 +132,23 @@ export const DISCORD_TOOLS = [
         since: { type: 'string', description: 'How far back: a relative time like 30m, 2h, 1d, or an ISO time', default: '12h' },
         per_channel: { type: 'number', description: 'Max messages to show per channel (1-50)', default: 15 },
         max_channels: { type: 'number', description: 'Max channels/threads to include (1-25)', default: 10 },
+      },
+      required: ['guild_id'],
+    },
+  },
+  {
+    name: 'discord_server_pulse',
+    description: 'A picture of a whole server over a time window instead of its messages: who has been around and where, who replied to or mentioned whom (and who never got a reply back), the busiest channels, open loops (people addressed who have not said anything in that channel since), and things said to the whole room that nobody has answered. Set mood to add a short reading of the mood and what people are working on, written by a Workers AI model and labelled as a reading. Use it to see what the community is doing, find conversations to join, or write a digest; use discord_catch_up when you need the messages themselves.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        guild_id: { type: 'string', description: 'The guild/server ID' },
+        since: { type: 'string', description: 'How far back: a relative time like 12h, 1d, 7d, or an ISO time', default: '24h' },
+        mood: { type: 'boolean', description: 'Add a short mood and what-people-are-working-on reading from a Workers AI model (needs the AI binding)', default: false },
+        quiet_hours: { type: 'number', description: 'How long a message said to the room must sit unanswered before it is listed (0-72 hours)', default: 2 },
+        exclude_channels: { type: 'array', items: { type: 'string' }, description: 'Channel IDs or names to leave out (their threads too), e.g. private or admin channels. Added to any the deployment already excludes.' },
+        per_channel: { type: 'number', description: 'Max messages to read per channel (1-300)', default: 100 },
+        max_channels: { type: 'number', description: 'Max channels/threads to include, busiest-recent first (1-50)', default: 25 },
       },
       required: ['guild_id'],
     },
@@ -914,7 +932,7 @@ const DESTRUCTIVE_TOOLS = new Set([
 ]);
 
 export function toolAnnotations(name: string) {
-  const readOnly = /^discord_(read|get|list|fetch)_/.test(name) || name === 'discord_catch_up' || name === 'discord_search_messages';
+  const readOnly = /^discord_(read|get|list|fetch)_/.test(name) || name === 'discord_catch_up' || name === 'discord_search_messages' || name === 'discord_server_pulse';
   return {
     readOnlyHint: readOnly,
     destructiveHint: !readOnly && DESTRUCTIVE_TOOLS.has(name),
@@ -974,6 +992,9 @@ async function resolveFileData(args: Record<string, unknown>): Promise<{ data: U
 export interface ToolExtras {
   elevenLabsApiKey?: string;
   elevenLabsVoiceId?: string;
+  ai?: AiBinding;
+  pulseModel?: string;
+  pulseExcludeChannels?: string;
 }
 
 // MCP content blocks a tool can return instead of plain text
@@ -1160,6 +1181,10 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
         totalMentions ? `${totalMentions} message(s) mention or reply to you, marked "→ you".` : 'Nothing mentions or replies to you.',
       ].join('\n');
       return [header, ...sections.map(s => s.text)].join('\n\n');
+    }
+
+    case 'discord_server_pulse': {
+      return serverPulse(token, args, { ai: extras?.ai, model: extras?.pulseModel, excludeChannels: extras?.pulseExcludeChannels });
     }
 
     case 'discord_send_typing': {

@@ -1,6 +1,6 @@
 # Cloud Discord
 
-A Discord MCP (Model Context Protocol) server that runs on Cloudflare Workers. It gives an AI agent a Discord bot account to work through: 65 tools for messaging, catching up, search, moderation, forums, roles, files, voice messages and more.
+A Discord MCP (Model Context Protocol) server that runs on Cloudflare Workers. It gives an AI agent a Discord bot account to work through: 66 tools for messaging, catching up, a server pulse, search, moderation, forums, roles, files, voice messages and more.
 
 You deploy it once to your own Cloudflare account and connect any MCP client to its URL (Claude Code, Claude Desktop, claude.ai, Cursor, and others). There's no database and no server to keep running.
 
@@ -85,7 +85,7 @@ Wrangler prints your Worker's address, like `https://cloud-discord.<your-subdoma
 ### 6. Check it works
 
 ```bash
-# Should print {"status":"ok","tools":65}
+# Should print {"status":"ok","tools":66}
 curl https://cloud-discord.<your-subdomain>.workers.dev/health
 
 # Should print a JSON result naming "cloud-discord"
@@ -197,6 +197,9 @@ An entry with a problem (a short or repeated `secret_path`, a missing token) is 
 | `ELEVENLABS_API_KEY` | secret | for voice notes | Text-to-speech |
 | `ELEVENLABS_VOICE_ID` | secret | no | Default voice, so `voice_id` can be left out of each call |
 | `AGENTS` | secret | no | JSON describing extra agents; see [Several agents](#several-agents-on-one-deployment) |
+| `AI` | Workers AI binding | for pulse mood | Lets `discord_server_pulse` write its optional mood reading; see [Server pulse](#server-pulse) |
+| `PULSE_MODEL` | var | no | Workers AI model for the mood reading. Default `@cf/google/gemma-4-26b-a4b-it` |
+| `PULSE_EXCLUDE_CHANNELS` | var | no | Comma-separated channel IDs or names the pulse never reads, for every agent |
 
 For local development, put secrets in `.dev.vars` (copy `.dev.vars.example`). It's gitignored.
 
@@ -226,6 +229,7 @@ To see live logs from your deployed Worker, run `npm run tail`.
 The server sends these to MCP clients as instructions, and they're here for humans too:
 
 - **Coming back after time away?** `discord_catch_up` with `since: "8h"` shows every channel and thread that moved, newest first, and marks messages that mention or reply to the bot with "→ you". It's one call instead of reading channels one by one.
+- **Want the shape of things rather than the messages?** `discord_server_pulse` with `since: "24h"` shows who has been around and where, who replied to or mentioned whom, open loops (people who were addressed and haven't spoken in that channel since), and things said to the whole room that nobody has answered yet. It's a good place to find a conversation to join. Add `mood: true` for a short reading of the mood and what people are working on.
 - **Looking for something specific?** `discord_search_messages` searches the whole server by text, author, channel or mention.
 - **Everything is addressed by ID.** Start with `discord_list_servers` (guild IDs), then `discord_list_channels` (channel IDs), then `discord_read_messages` (each message line includes its ID). Humans can copy IDs in Discord after turning on **Settings > Advanced > Developer Mode**.
 - **Threads and forum posts are channels.** Pass a thread's ID as `channel_id` to read or send in it.
@@ -259,6 +263,19 @@ If the bot isn't allowed to send voice messages somewhere (it needs **Send Voice
 
 Without the API key, only this tool returns an error; everything else works normally.
 
+### Server pulse
+
+`discord_server_pulse` works with nothing extra. Its counts, connections and open loops come from the messages themselves. The optional mood reading (`mood: true`) needs a [Workers AI](https://developers.cloudflare.com/workers-ai/) binding, which uses Cloudflare's free daily allowance rather than any API key. Add this to `wrangler.toml` and deploy:
+
+```toml
+[ai]
+binding = "AI"
+```
+
+The default model is Gemma 4 26B-A4B with its reasoning turned off. A reading at full size (about 12,000 characters of messages) measured about 30 neurons, against 10,000 free each day. Set `PULSE_MODEL` to use another model. The reading is labelled as a model's reading in the output, because that's what it is.
+
+If some channels should never end up in a pulse or a digest made from one (for example sign-ups, moderation or anything private), list them in `PULSE_EXCLUDE_CHANNELS`. Their threads are left out too. Agents can also pass `exclude_channels` on a call.
+
 ### Direct file upload
 
 For local files too big to pass through an MCP tool as base64 (audio especially), post them straight to the upload endpoint:
@@ -280,11 +297,11 @@ Discord allows up to 20 MB per file (more on boosted servers).
 
 ## Tool reference
 
-65 tools. Each MCP client also gets the full parameter list for every tool.
+66 tools. Each MCP client also gets the full parameter list for every tool.
 
 | Category | Count |
 |----------|-------|
-| [Catching up & search](#catching-up--search) | 2 |
+| [Catching up & search](#catching-up--search) | 3 |
 | [Messaging](#messaging) | 10 |
 | [Reactions & pins](#reactions--pins) | 6 |
 | [Channels](#channels) | 7 |
@@ -301,6 +318,7 @@ Discord allows up to 20 MB per file (more on boosted servers).
 |------|-------------|
 | `discord_catch_up` | Everything new across a server since a time, with "→ you" on mentions and replies to the bot |
 | `discord_search_messages` | Search a server by text, author, channel, mentions, or attachment type |
+| `discord_server_pulse` | A picture of a server over a time window: who's been around, who talked to whom, open loops, and an optional mood reading |
 
 ### Messaging
 | Tool | Description |
