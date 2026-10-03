@@ -5,6 +5,7 @@ import { DISCORD_TOOLS, handleDiscordTool, toolAnnotations } from './tools';
 import { discordFetch, discordFetchMultipart, formatMessage } from './discord';
 import Anthropic from '@anthropic-ai/sdk';
 import nacl from 'tweetnacl';
+import { version } from '../package.json';
 import { Agent, AgentEnv, DEFAULT_AGENT_NAME, findAgentByName, loadAgents, matchMcpPath } from './agents';
 
 type Env = AgentEnv;
@@ -37,10 +38,10 @@ function jsonRpcError(id: string | number | null, code: number, message: string,
   return { jsonrpc: '2.0', id, error: { code, message, data } };
 }
 
-// MCP server info
+// MCP server info. The version comes from package.json so it can't drift from releases again
 const SERVER_INFO = {
   name: 'cloud-discord',
-  version: '1.0.0',
+  version,
 };
 
 // Protocol versions this server can speak; the newest is offered when the client asks for one we don't know
