@@ -5,6 +5,8 @@
 //   { "fable": { "secret_path": "...", "discord_token": "...", "elevenlabs_voice_id": "..." } }
 // The single-bot settings (DISCORD_BOT_TOKEN + MCP_SECRET_PATH) still work as the "default" agent.
 
+import type { AiBinding } from './pulse';
+
 export interface AgentEnv {
   AGENTS?: string;
   DISCORD_BOT_TOKEN?: string;
@@ -13,6 +15,9 @@ export interface AgentEnv {
   ANTHROPIC_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_VOICE_ID?: string;
+  // Workers AI, only for discord_server_pulse's optional mood reading
+  AI?: AiBinding;
+  PULSE_MODEL?: string;
 }
 
 export interface Agent {

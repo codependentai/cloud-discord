@@ -366,7 +366,7 @@ export default {
               agent.discordToken,
               params.name,
               params.arguments || {},
-              { elevenLabsApiKey: agent.elevenLabsApiKey, elevenLabsVoiceId: agent.elevenLabsVoiceId },
+              { elevenLabsApiKey: agent.elevenLabsApiKey, elevenLabsVoiceId: agent.elevenLabsVoiceId, ai: env.AI, pulseModel: env.PULSE_MODEL },
             );
             result = {
               content: typeof toolResult === 'string' ? [{ type: 'text', text: toolResult }] : toolResult,
