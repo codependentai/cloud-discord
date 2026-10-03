@@ -82,19 +82,127 @@ export async function discordFetch(
   }));
 }
 
-// Helper to format a Discord message object into readable text
+const DISCORD_EPOCH = 1420070400000n;
+
+// Snowflakes encode their creation time, so a time can be turned into an ID to page or filter by
+export function snowflakeFromTime(ms: number): string {
+  return ((BigInt(Math.floor(ms)) - DISCORD_EPOCH) << 22n).toString();
+}
+
+// Accepts an ISO time ("2026-10-02T22:00:00Z") or a relative one ("30m", "2h", "1d")
+export function parseSince(since: string, now = Date.now()): number {
+  const relative = since.trim().match(/^(\d+(?:\.\d+)?)\s*(m|min|h|hr|d|day)s?$/i);
+  if (relative) {
+    const unit = relative[2].toLowerCase()[0];
+    const ms = unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000;
+    return now - Number(relative[1]) * ms;
+  }
+  const parsed = Date.parse(since);
+  if (Number.isNaN(parsed)) throw new Error(`Can't read "${since}" as a time. Use an ISO time or something like 30m, 2h, 1d.`);
+  return parsed;
+}
+
+function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+function emojiLabel(emoji: any): string {
+  return emoji?.id ? `:${emoji.name}:` : (emoji?.name ?? '?');
+}
+
+// Helper to format a Discord message object into readable text.
+// Written for a model reading it: who (display name and handle), what, and what's attached.
 export function formatMessage(msg: any): string {
   const timestamp = msg.timestamp;
-  const author = msg.author?.username ?? 'Unknown';
-  const content = msg.content || '[no text content]';
-  const attachments = msg.attachments?.length > 0
-    ? `\n  Attachments: ${msg.attachments.map((a: any) => a.url).join(', ')}`
+  const user = msg.author ?? {};
+  const handle = user.username ?? 'Unknown';
+  const author = user.global_name && user.global_name !== handle ? `${user.global_name} (@${handle})` : handle;
+  const bot = user.bot ? ' [bot]' : '';
+  const edited = msg.edited_timestamp ? ' (edited)' : '';
+  const replyTo = msg.message_reference?.message_id && msg.message_reference?.type !== 1
+    ? ` (reply to ${msg.message_reference.message_id})`
     : '';
-  const embeds = msg.embeds?.length > 0
-    ? `\n  Embeds: ${msg.embeds.length} embed(s)`
-    : '';
-  const replyTo = msg.message_reference?.message_id ? ` (reply to ${msg.message_reference.message_id})` : '';
-  return `[${timestamp}] (ID: ${msg.id}) ${author}${replyTo}: ${content}${attachments}${embeds}`;
+
+  const extras: string[] = [];
+  for (const snapshot of msg.message_snapshots ?? []) {
+    const forwarded = snapshot.message ?? {};
+    const files = forwarded.attachments?.length ? ` [+${forwarded.attachments.length} attachment(s)]` : '';
+    extras.push(`Forwarded: ${clip(forwarded.content || '[no text]', 500)}${files}`);
+  }
+  if (msg.attachments?.length) {
+    extras.push(`Attachments: ${msg.attachments.map((a: any) => {
+      const voice = a.duration_secs ? `, voice message ${Math.round(a.duration_secs)}s` : '';
+      return `${a.filename} (${a.content_type ?? 'file'}${voice}) ${a.url}`;
+    }).join(', ')}`);
+  }
+  for (const embed of msg.embeds ?? []) {
+    const parts = [embed.title, embed.description].filter(Boolean).map((t: string) => clip(t, 300));
+    const fields = embed.fields?.length ? ` [${embed.fields.length} field(s)]` : '';
+    if (parts.length || fields) extras.push(`Embed: ${parts.join(' — ')}${fields}`);
+  }
+  if (msg.poll) {
+    const counts = new Map((msg.poll.results?.answer_counts ?? []).map((c: any) => [c.answer_id, c.count]));
+    const answers = (msg.poll.answers ?? []).map((a: any) => `${a.poll_media?.text ?? '?'} (${counts.get(a.answer_id) ?? 0})`);
+    const state = msg.poll.results?.is_finalized ? 'closed' : 'open';
+    extras.push(`Poll (${state}): ${msg.poll.question?.text ?? ''} — ${answers.join(' / ')}`);
+  }
+  if (msg.sticker_items?.length) {
+    extras.push(`Stickers: ${msg.sticker_items.map((st: any) => st.name).join(', ')}`);
+  }
+  if (msg.reactions?.length) {
+    extras.push(`Reactions: ${msg.reactions.map((r: any) => `${emojiLabel(r.emoji)} ${r.count}`).join(', ')}`);
+  }
+  if (msg.thread) {
+    extras.push(`Thread: ${msg.thread.name} (ID: ${msg.thread.id})`);
+  }
+
+  // Show <@id> mentions as @name, so the reader knows who was addressed
+  const named = new Map<string, string>((msg.mentions ?? []).map((u: any) => [u.id, u.global_name || u.username]));
+  const text = (msg.content || '').replace(/<@!?(\d+)>/g, (tag: string, id: string) => named.has(id) ? `@${named.get(id)}` : tag);
+  const content = text || (extras.length ? '' : '[no text content]');
+  const tail = extras.map(e => `\n  ${e}`).join('');
+  return `[${timestamp}] (ID: ${msg.id}) ${author}${bot}${replyTo}${edited}: ${content}${tail}`;
+}
+
+// Discord rejects content over 2000 characters. Split on paragraph, then line, then word
+// boundaries, and keep code fences balanced across the pieces.
+export const MESSAGE_LIMIT = 2000;
+
+export function splitMessage(text: string, limit = MESSAGE_LIMIT): string[] {
+  if (text.length <= limit) return [text];
+  const chunks: string[] = [];
+  let rest = text;
+  let openFence: string | null = null;
+
+  while (rest.length > 0) {
+    const prefix = openFence ? `${openFence}\n` : '';
+    // Room for a closing fence if this piece ends inside a code block
+    const budget = limit - prefix.length - 4;
+    if (prefix.length + rest.length <= limit) {
+      chunks.push(prefix + rest);
+      break;
+    }
+    let cut = -1;
+    for (const sep of ['\n\n', '\n', ' ']) {
+      const at = rest.lastIndexOf(sep, budget);
+      if (at > budget / 2) { cut = at; break; }
+    }
+    if (cut === -1) cut = budget;
+    let piece = rest.slice(0, cut);
+    rest = rest.slice(cut).replace(/^\s+/, '');
+
+    // Track whether this piece leaves a ``` block open
+    let fence: string | null = openFence;
+    for (const match of piece.matchAll(/^```(\S*)/gm)) {
+      fence = fence ? null : '```' + match[1];
+    }
+    piece = prefix + piece;
+    if (fence) piece += '\n```';
+    openFence = fence;
+    chunks.push(piece);
+  }
+  return chunks;
 }
 
 // Send a message with file attachment via multipart/form-data

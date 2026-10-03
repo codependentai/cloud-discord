@@ -1,6 +1,6 @@
 # Cloud Discord
 
-A Discord MCP (Model Context Protocol) server that runs on Cloudflare Workers. It gives an AI agent a Discord bot account to work through: 59 tools for messaging, moderation, forums, roles, files, voice notes and more.
+A Discord MCP (Model Context Protocol) server that runs on Cloudflare Workers. It gives an AI agent a Discord bot account to work through: 65 tools for messaging, catching up, search, moderation, forums, roles, files, voice messages and more.
 
 You deploy it once to your own Cloudflare account and connect any MCP client to its URL (Claude Code, Claude Desktop, claude.ai, Cursor, and others). There's no database and no server to keep running.
 
@@ -30,7 +30,7 @@ You deploy it once to your own Cloudflare account and connect any MCP client to 
 3. On the **General Information** tab, copy the **Public Key**. You need it in step 3, and it's only used by the optional `/vibe` command.
 4. On **OAuth2 > URL Generator**:
    - Scopes: `bot` and `applications.commands`
-   - Bot permissions: `Administrator` is the simplest choice. For a narrower bot, pick only what you'll use: View Channels, Send Messages, Read Message History, Attach Files, Add Reactions, Manage Messages, Manage Threads, Create Polls, and the moderation and role permissions you need.
+   - Bot permissions: `Administrator` is the simplest choice. For a narrower bot, pick only what you'll use: View Channels, Send Messages, Send Messages in Threads, Read Message History, Attach Files, Add Reactions, Pin Messages, Send Voice Messages, Manage Messages, Manage Threads, Create Polls, and the moderation and role permissions you need. (Since February 2026, pinning needs **Pin Messages**; Manage Messages alone no longer covers it.)
    - Open the generated URL and invite the bot to your server.
 
 ### 2. Clone and install
@@ -85,7 +85,7 @@ Wrangler prints your Worker's address, like `https://cloud-discord.<your-subdoma
 ### 6. Check it works
 
 ```bash
-# Should print {"status":"ok","tools":59}
+# Should print {"status":"ok","tools":65}
 curl https://cloud-discord.<your-subdomain>.workers.dev/health
 
 # Should print a JSON result naming "cloud-discord"
@@ -212,6 +212,10 @@ For local development, put secrets in `.dev.vars` (copy `.dev.vars.example`). It
 | `discord_get_guild_members` fails | Server Members Intent is off | Turn it on (Setup, step 1) |
 | `Unknown Channel` / `Unknown Message` (10003 / 10008) | Wrong ID, or it was deleted | IDs are long numbers; re-list to get fresh ones |
 | `Cannot send messages to this user` (50007) | The user has DMs closed or shares no server with the bot | Nothing the bot can do; message them in a channel instead |
+| Pinning fails with Missing Permissions | Pinning needs **Pin Messages** since February 2026 | Grant Pin Messages to the bot's role |
+| Voice note arrives as a file, not a voice message | The bot lacks **Send Voice Messages** there | Grant it; the tool falls back to a file so nothing is lost |
+| Forwarding fails with code 160014 | The bot can't read the original message's content | Give it Read Message History there, and keep Message Content Intent on |
+| Search says the server is being indexed | First search in that server | Try again after the few seconds it names |
 | `Rate limited; retry after Ns` | Discord asked the bot to slow down for longer than the server waits | Wait that long and try again |
 | Voice note: `ElevenLabs API key not configured` | `ELEVENLABS_API_KEY` isn't set | `npx wrangler secret put ELEVENLABS_API_KEY` |
 
@@ -221,10 +225,14 @@ To see live logs from your deployed Worker, run `npm run tail`.
 
 The server sends these to MCP clients as instructions, and they're here for humans too:
 
+- **Coming back after time away?** `discord_catch_up` with `since: "8h"` shows every channel and thread that moved, newest first, and marks messages that mention or reply to the bot with "→ you". It's one call instead of reading channels one by one.
+- **Looking for something specific?** `discord_search_messages` searches the whole server by text, author, channel or mention.
 - **Everything is addressed by ID.** Start with `discord_list_servers` (guild IDs), then `discord_list_channels` (channel IDs), then `discord_read_messages` (each message line includes its ID). Humans can copy IDs in Discord after turning on **Settings > Advanced > Developer Mode**.
 - **Threads and forum posts are channels.** Pass a thread's ID as `channel_id` to read or send in it.
 - **Custom emoji** can be passed as `<:name:id>` or `name:id`; Unicode emoji are passed as-is.
 - **Tools are annotated.** Read-only tools are marked `readOnlyHint`, and tools that delete, ban, kick, or change permissions are marked `destructiveHint`, so clients can ask before running them.
+- **Mentions are safe by default.** User mentions ping, but @everyone, @here and role mentions don't unless a tool call sets `allow_mass_mentions: true`.
+- **Long messages are fine.** Anything over Discord's 2000-character limit is split at paragraph or line breaks, with code blocks kept intact.
 - **Images come back as images.** `discord_fetch_image` returns the picture itself, not a link, so a vision-capable model can look at it.
 
 ## Optional features
@@ -240,9 +248,11 @@ Anyone in your server can type `/vibe` to get a one-paragraph read on what the c
    ```
 3. In the Developer Portal, set **Interactions Endpoint URL** to `https://cloud-discord.<your-subdomain>.workers.dev/interactions` and save. Discord checks the endpoint right away, so the Worker must already be deployed with the right public key.
 
-### Voice notes
+### Voice messages
 
-`discord_send_voice_note` turns text into speech with [ElevenLabs](https://elevenlabs.io/) and posts it as an audio file.
+`discord_send_voice_note` turns text into speech with [ElevenLabs](https://elevenlabs.io/) and posts it as a native Discord voice message: the playable bubble with a waveform, like one recorded on a phone. The audio is generated as Ogg/Opus at 48 kHz and 32 kbps, the same as Discord's own clients. The duration and waveform are read from the Ogg file itself, with no audio decoding in the Worker.
+
+If the bot isn't allowed to send voice messages somewhere (it needs **Send Voice Messages**), the same audio is sent as an ordinary file instead. Pass `as_voice_message: false` to get an mp3 attachment.
 
 1. Get an ElevenLabs API key and set it: `npx wrangler secret put ELEVENLABS_API_KEY`
 2. Find a voice ID in the [Voice Lab](https://elevenlabs.io/app/voice-lab). Either set it as the default (`npx wrangler secret put ELEVENLABS_VOICE_ID`) or pass `voice_id` on each call.
@@ -266,15 +276,16 @@ curl -F "user_id=USER_ID" \
      https://cloud-discord.<your-subdomain>.workers.dev/mcp/<your-secret-path>/upload
 ```
 
-Discord's upload size limits apply (10 MB on servers without boosts).
+Discord allows up to 20 MB per file (more on boosted servers).
 
 ## Tool reference
 
-59 tools. Each MCP client also gets the full parameter list for every tool.
+65 tools. Each MCP client also gets the full parameter list for every tool.
 
 | Category | Count |
 |----------|-------|
-| [Messaging](#messaging) | 8 |
+| [Catching up & search](#catching-up--search) | 2 |
+| [Messaging](#messaging) | 10 |
 | [Reactions & pins](#reactions--pins) | 6 |
 | [Channels](#channels) | 7 |
 | [Threads](#threads) | 3 |
@@ -282,20 +293,28 @@ Discord's upload size limits apply (10 MB on servers without boosts).
 | [Roles](#roles) | 7 |
 | [Members & moderation](#members--moderation) | 7 |
 | [Server](#server) | 2 |
-| [Invites & polls](#invites--polls) | 4 |
+| [Invites & polls](#invites--polls) | 6 |
 | [Files, images & voice](#files-images--voice) | 5 |
+
+### Catching up & search
+| Tool | Description |
+|------|-------------|
+| `discord_catch_up` | Everything new across a server since a time, with "→ you" on mentions and replies to the bot |
+| `discord_search_messages` | Search a server by text, author, channel, mentions, or attachment type |
 
 ### Messaging
 | Tool | Description |
 |------|-------------|
 | `discord_read_messages` | Read channel history (1-100 messages, with IDs; page with `before`/`after`) |
 | `discord_read_dm_messages` | Read DM history with a user |
-| `discord_send_message` | Send a message, optionally as a reply |
+| `discord_send_message` | Send a message, optionally as a reply; long text is split automatically |
 | `discord_send_dm` | Send a direct message to a user |
 | `discord_edit_message` | Edit one of the bot's own messages |
 | `discord_delete_message` | Delete a message |
 | `discord_bulk_delete_messages` | Delete 2-100 messages at once (each under 14 days old) |
 | `discord_send_embed` | Send a rich embed with title, fields, images, colors |
+| `discord_send_typing` | Show "typing…" before a slow reply |
+| `discord_forward_message` | Forward a message to another channel |
 
 ### Reactions & pins
 | Tool | Description |
@@ -305,7 +324,7 @@ Discord's upload size limits apply (10 MB on servers without boosts).
 | `discord_get_message_reactions` | Get reaction counts on a message |
 | `discord_pin_message` | Pin a message |
 | `discord_unpin_message` | Unpin a message |
-| `discord_get_pinned_messages` | List pinned messages |
+| `discord_get_pinned_messages` | List pinned messages, with when each was pinned |
 
 ### Channels
 | Tool | Description |
@@ -374,6 +393,8 @@ Discord's upload size limits apply (10 MB on servers without boosts).
 | `discord_list_invites` | List invites |
 | `discord_delete_invite` | Revoke an invite |
 | `discord_create_poll` | Create a native poll (2-10 answers) |
+| `discord_end_poll` | Close one of the bot's polls now |
+| `discord_get_poll_voters` | See who voted for an answer |
 
 ### Files, images & voice
 | Tool | Description |
@@ -382,7 +403,7 @@ Discord's upload size limits apply (10 MB on servers without boosts).
 | `discord_send_dm_file` | Send a file as a DM |
 | `discord_fetch_image` | Fetch an image attachment so the model can see it |
 | `discord_fetch_dm_image` | Same, from a DM |
-| `discord_send_voice_note` | Generate speech and send it (needs ElevenLabs) |
+| `discord_send_voice_note` | Speak text and send it as a native voice message (needs ElevenLabs) |
 
 ## How it works
 
