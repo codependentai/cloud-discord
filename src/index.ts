@@ -50,6 +50,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER_INSTRUCTIONS = `Discord tools acting as one bot account.
 - Every ID (guild, channel, message, user, role) is a numeric string. Find them with discord_list_servers, then discord_list_channels, then discord_read_messages; message lines include message IDs.
 - Returning after time away? discord_catch_up shows everything new across a server since a time, and marks what mentions or replies to you.
+- Want to know what a community is doing, or find a conversation to join? discord_server_pulse shows who has been around, who talked to whom, and who is still waiting for an answer.
 - Threads and forum posts are channels: pass a thread ID as channel_id to read or send in them.
 - The bot can only see and act where its roles allow. "Missing Access" (50001) means it cannot see that channel; "Missing Permissions" (50013) means it lacks the permission or its role is too low.
 - Delete, ban, kick and bulk-delete cannot be undone.`;
