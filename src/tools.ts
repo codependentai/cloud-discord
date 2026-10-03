@@ -1766,12 +1766,10 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
 
       const asVoiceMessage = args.as_voice_message !== false;
 
-      // Opus at 48 kHz / 32 kbps matches what Discord's own clients record
-      const format = asVoiceMessage ? 'opus_48000_32' : 'mp3_44100_128';
-      const ttsRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=${format}`, {
+      const speak = (format: string) => fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=${format}`, {
         method: 'POST',
         headers: {
-          'xi-api-key': extras.elevenLabsApiKey,
+          'xi-api-key': extras.elevenLabsApiKey!,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1781,10 +1779,21 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
         }),
       });
 
+      // Opus at 48 kHz / 32 kbps matches what Discord's own clients record.
+      // If Opus is refused (some plans or voices), fall back to mp3 rather than failing.
+      let ttsRes = await speak(asVoiceMessage ? 'opus_48000_32' : 'mp3_44100_128');
+      let opusError = '';
+      if (!ttsRes.ok && asVoiceMessage) {
+        opusError = `ElevenLabs ${ttsRes.status}: ${(await ttsRes.text()).slice(0, 200)}`;
+        ttsRes = await speak('mp3_44100_128');
+      }
+
       if (!ttsRes.ok) {
         const errText = await ttsRes.text();
-        throw new Error(`ElevenLabs error ${ttsRes.status}: ${errText}`);
+        const tried = opusError ? `Opus failed (${opusError}), then mp3 failed: ` : '';
+        throw new Error(`${tried}ElevenLabs error ${ttsRes.status}: ${errText}`);
       }
+      const opusFailure = opusError ? `Opus unavailable (${opusError}); sent mp3 instead. ` : '';
 
       const audioData = new Uint8Array(await ttsRes.arrayBuffer());
 
@@ -1821,7 +1830,7 @@ export async function handleDiscordTool(token: string, name: string, args: Recor
 
       const res = await discordFetchMultipart(token, 'POST', channelPath, payload, audioData, fileName, isOgg ? 'audio/ogg' : 'audio/mpeg');
       if (!res.ok) throw new Error(`Discord API error: ${JSON.stringify(res.data)}`);
-      return `Voice note sent as ${fileName} (${audioData.byteLength} bytes, message ID: ${(res.data as any).id})`;
+      return `${opusFailure}Voice note sent as ${fileName} (${audioData.byteLength} bytes, message ID: ${(res.data as any).id})`;
     }
 
     // === POLLS ===

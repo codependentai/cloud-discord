@@ -184,13 +184,15 @@ export function splitMessage(text: string, limit = MESSAGE_LIMIT): string[] {
       break;
     }
     let cut = -1;
+    let sepLength = 0;
     for (const sep of ['\n\n', '\n', ' ']) {
       const at = rest.lastIndexOf(sep, budget);
-      if (at > budget / 2) { cut = at; break; }
+      if (at > budget / 2) { cut = at; sepLength = sep.length; break; }
     }
     if (cut === -1) cut = budget;
     let piece = rest.slice(0, cut);
-    rest = rest.slice(cut).replace(/^\s+/, '');
+    // Drop only the break we cut at, so indentation on the next line survives (code blocks)
+    rest = rest.slice(cut + sepLength);
 
     // Track whether this piece leaves a ``` block open
     let fence: string | null = openFence;
