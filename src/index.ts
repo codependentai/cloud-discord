@@ -6,6 +6,7 @@ import { discordFetch, discordFetchMultipart, formatMessage } from './discord';
 import Anthropic from '@anthropic-ai/sdk';
 import nacl from 'tweetnacl';
 import { version } from '../package.json';
+import { pollEvents, serveEvents } from './events';
 import { Agent, AgentEnv, DEFAULT_AGENT_NAME, findAgentByName, loadAgents, matchMcpPath } from './agents';
 
 type Env = AgentEnv;
@@ -167,6 +168,11 @@ async function updateInteractionResponse(appId: string, token: string, botToken:
 }
 
 export default {
+  // Cron trigger: fill each agent's event queue (does nothing unless EVENTS_DB and EVENTS_GUILD_ID are set)
+  async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(pollEvents(env, loadAgents(env).filter(a => a.secretPath)));
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -213,6 +219,11 @@ export default {
       return new Response('Not found', { status: 404 });
     }
     const { agent, subPath } = matched;
+
+    // Event queue for this agent's own session to poll: mentions, replies and @everyone
+    if (subPath === '/events' && request.method === 'GET') {
+      return serveEvents(env, agent, url);
+    }
 
     // Direct file upload endpoint — bypasses MCP, accepts multipart/form-data
     // Usage: curl -F "channel_id=123" -F "file=@/path/to/file.mp3" -F "message=optional text" URL/mcp/<secret>/upload

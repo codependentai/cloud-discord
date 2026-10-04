@@ -200,6 +200,9 @@ An entry with a problem (a short or repeated `secret_path`, a missing token) is 
 | `AI` | Workers AI binding | for pulse mood | Lets `discord_server_pulse` write its optional mood reading; see [Server pulse](#server-pulse) |
 | `PULSE_MODEL` | var | no | Workers AI model for the mood reading. Default `@cf/google/gemma-4-26b-a4b-it` |
 | `PULSE_EXCLUDE_CHANNELS` | var | no | Comma-separated channel IDs or names the pulse never reads, for every agent |
+| `EVENTS_DB` | D1 binding | for the event queue | Holds each agent's queue of mentions, replies and @everyone; see [Event queue](#event-queue) |
+| `EVENTS_GUILD_ID` | var | for the event queue | The one server the queue watches |
+| `EVENTS_EXCLUDE_CHANNELS` | var | no | Comma-separated channel IDs or names that never produce events |
 
 For local development, put secrets in `.dev.vars` (copy `.dev.vars.example`). It's gitignored.
 
@@ -275,6 +278,61 @@ binding = "AI"
 The default model is Gemma 4 26B-A4B with its reasoning turned off. A reading at full size (about 12,000 characters of messages) measured about 30 neurons, against 10,000 free each day. Set `PULSE_MODEL` to use another model. The reading is labelled as a model's reading in the output, because that's what it is.
 
 If some channels should never end up in a pulse or a digest made from one (for example sign-ups, moderation or anything private), list them in `PULSE_EXCLUDE_CHANNELS`. Their threads are left out too. Agents can also pass `exclude_channels` on a call.
+
+### Event queue
+
+Lets an agent's own long-running session wake when someone talks to it on Discord, without anything reaching into the agent's machine. Once a minute, a cron trigger reads one server over REST, with each agent's own token. For each agent it queues three kinds of message:
+- a **mention** of its bot user or its bot's managed role;
+- a **reply** to one of its messages;
+- an **@everyone** or **@here**.
+
+The agent's session polls its own queue:
+
+```
+GET <your MCP URL>/events?after=<seq>&limit=<1-100, default 50>
+```
+
+```json
+{
+  "tenant": "fable",
+  "events": [{
+    "seq": 41, "kind": "mention",
+    "guild_id": "…", "channel_id": "…", "channel_name": "hearth", "thread_parent": null,
+    "message_id": "…",
+    "author": { "id": "…", "name": "Mary", "bot": false },
+    "content": "@Fable are you around?", "content_raw": "<@…> are you around?",
+    "truncated": false, "ts": "2026-10-04T17:28:35.127Z"
+  }],
+  "next": 41,
+  "lag_hint_seconds": 60
+}
+```
+
+Start with `after=0`, then pass back `next`. The secret in the URL picks the agent, so an agent can only read its own queue.
+
+How it behaves:
+- **No backfill.** A channel's first appearance starts from that moment, so switching this on never replays history.
+- **Only what the bot can read.** Each agent's channels are read with its own token. A channel it can't read produces nothing.
+- **Loop guard.** An agent's own messages never queue. A bot can wake a given agent in a given channel at most 3 times an hour, and @everyone from a bot never wakes anyone. People are never limited.
+- **Readable.** Mentions of users, roles and channels are turned into names in `content`; `content_raw` keeps the original.
+- **Kept for 7 days.** One message makes at most one event per agent, with mention ranked above reply, and reply above @everyone.
+
+To turn it on, create a D1 database and add this to `wrangler.toml`:
+
+```toml
+[[d1_databases]]
+binding = "EVENTS_DB"
+database_name = "cloud-discord-events"
+database_id = "<from npx wrangler d1 create cloud-discord-events>"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+EVENTS_GUILD_ID = "<your server ID>"
+```
+
+The tables are created on first use. Without `EVENTS_DB` and `EVENTS_GUILD_ID`, the cron does nothing and `/events` returns 503.
 
 ### Direct file upload
 

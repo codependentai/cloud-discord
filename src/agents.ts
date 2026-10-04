@@ -6,8 +6,9 @@
 // The single-bot settings (DISCORD_BOT_TOKEN + MCP_SECRET_PATH) still work as the "default" agent.
 
 import type { AiBinding } from './pulse';
+import type { EventsEnv } from './events';
 
-export interface AgentEnv {
+export interface AgentEnv extends EventsEnv {
   AGENTS?: string;
   DISCORD_BOT_TOKEN?: string;
   MCP_SECRET_PATH?: string;
