@@ -2,7 +2,7 @@
 
 A Discord MCP (Model Context Protocol) server that runs on Cloudflare Workers. It gives an AI agent a Discord bot account to work through: 66 tools for messaging, catching up, a server pulse, search, moderation, forums, roles, files, voice messages and more.
 
-You deploy it once to your own Cloudflare account and connect any MCP client to its URL (Claude Code, Claude Desktop, claude.ai, Cursor, and others). There's no database and no server to keep running.
+You deploy it once to your own Cloudflare account and connect any MCP client to its URL (Claude Code, Claude Desktop, claude.ai, Cursor, and others). There's no server to keep running, and no database unless you turn on the optional [event queue](#event-queue), which lets an agent wake up when someone talks to it on Discord.
 
 **What you need:** a Cloudflare account (the free tier works), Node.js 18+, and a Discord server where you can add a bot. Setup takes about 15 minutes.
 
@@ -13,7 +13,7 @@ You deploy it once to your own Cloudflare account and connect any MCP client to 
 - [Configuration reference](#configuration-reference)
 - [Troubleshooting](#troubleshooting)
 - [Tips for agents](#tips-for-agents)
-- [Optional features](#optional-features): `/vibe`, voice notes, direct file upload
+- [Optional features](#optional-features): `/vibe`, voice notes, server pulse, event queue, direct file upload
 - [Tool reference](#tool-reference)
 - [Development](#development)
 
@@ -200,6 +200,9 @@ An entry with a problem (a short or repeated `secret_path`, a missing token) is 
 | `AI` | Workers AI binding | for pulse mood | Lets `discord_server_pulse` write its optional mood reading; see [Server pulse](#server-pulse) |
 | `PULSE_MODEL` | var | no | Workers AI model for the mood reading. Default `@cf/google/gemma-4-26b-a4b-it` |
 | `PULSE_EXCLUDE_CHANNELS` | var | no | Comma-separated channel IDs or names the pulse never reads, for every agent |
+| `EVENTS_DB` | D1 binding | for the event queue | Holds each agent's queue of mentions, replies and @everyone; see [Event queue](#event-queue) |
+| `EVENTS_GUILD_ID` | var | for the event queue | The one server the queue watches |
+| `EVENTS_EXCLUDE_CHANNELS` | var | no | Comma-separated channel IDs or names that never produce events |
 
 For local development, put secrets in `.dev.vars` (copy `.dev.vars.example`). It's gitignored.
 
@@ -221,6 +224,11 @@ For local development, put secrets in `.dev.vars` (copy `.dev.vars.example`). It
 | Search says the server is being indexed | First search in that server | Try again after the few seconds it names |
 | `Rate limited; retry after Ns` | Discord asked the bot to slow down for longer than the server waits | Wait that long and try again |
 | Voice note: `ElevenLabs API key not configured` | `ELEVENLABS_API_KEY` isn't set | `npx wrangler secret put ELEVENLABS_API_KEY` |
+| Pulse mood says it's unavailable | No Workers AI binding | Add `[ai] binding = "AI"` to `wrangler.toml` and deploy |
+| `/events` returns 503 `events not configured` | `EVENTS_DB` or `EVENTS_GUILD_ID` is missing | See [Event queue](#event-queue) |
+| `/events` stays empty right after switching on | Expected: there's no backfill, and each channel starts from the first tick that sees it | Wait a minute, then mention the bot to test |
+| `/events` never fills | The cron isn't running, or can't read the channels | `npm run tail` and look for one `[events]` line per agent each minute. No lines: run `npx wrangler triggers deploy` (needed once if you deploy with `versions deploy`). "0 channel(s) watched": check `EVENTS_GUILD_ID` and the bot's View Channel permission |
+| Events from one channel never arrive | That bot can't read the channel (each agent reads with its own token), or it's excluded | Grant View Channel and Read Message History, or check `EVENTS_EXCLUDE_CHANNELS` |
 
 To see live logs from your deployed Worker, run `npm run tail`.
 
@@ -237,6 +245,7 @@ The server sends these to MCP clients as instructions, and they're here for huma
 - **Tools are annotated.** Read-only tools are marked `readOnlyHint`, and tools that delete, ban, kick, or change permissions are marked `destructiveHint`, so clients can ask before running them.
 - **Mentions are safe by default.** User mentions ping, but @everyone, @here and role mentions don't unless a tool call sets `allow_mass_mentions: true`.
 - **Long messages are fine.** Anything over Discord's 2000-character limit is split at paragraph or line breaks, with code blocks kept intact.
+- **Woken by a Discord message?** If your session polls the [event queue](#event-queue), answer with `reply_to` set to the message ID you were given, so the answer sits in its thread and people (and `discord_server_pulse`) can see it was answered. For an @everyone, answer only if you have something real to add, because every agent got the same wake.
 - **Images come back as images.** `discord_fetch_image` returns the picture itself, not a link, so a vision-capable model can look at it.
 
 ## Optional features
@@ -275,6 +284,123 @@ binding = "AI"
 The default model is Gemma 4 26B-A4B with its reasoning turned off. A reading at full size (about 12,000 characters of messages) measured about 30 neurons, against 10,000 free each day. Set `PULSE_MODEL` to use another model. The reading is labelled as a model's reading in the output, because that's what it is.
 
 If some channels should never end up in a pulse or a digest made from one (for example sign-ups, moderation or anything private), list them in `PULSE_EXCLUDE_CHANNELS`. Their threads are left out too. Agents can also pass `exclude_channels` on a call.
+
+### Event queue
+
+#### In plain words, for the people in the server
+
+Normally an agent only sees Discord when it goes looking. It checks in on a schedule, or when someone asks it to. With the event queue on, an agent whose session is running can be woken when you talk to it, so it answers within a couple of minutes instead of at its next check-in.
+
+**What wakes an agent:**
+- **@-mentioning it**, either its name or its bot role.
+- **Replying to one of its messages.**
+- **@everyone or @here**, which wakes every agent at once. They're told to answer only if they have something real to add, but expect more than one reply.
+
+**What doesn't:**
+- **Saying its name without the @.** "Ghost, are you there?" won't wake Ghost; "@Ghost, are you there?" will.
+- **Messages in channels its bot can't see,** or channels the server owner has excluded.
+- **Its own messages.**
+- **Anything outside the one server the queue watches.**
+
+**How fast:** the worker checks once a minute, and the agent's session checks its queue about once a minute. So a reply usually starts within one to two minutes, plus however long the agent takes to write it.
+
+**When agents talk to each other:** a bot can wake a given agent in a given channel at most three times an hour, so two agents can't keep waking each other forever. A bot's @everyone never wakes anyone. People are never limited.
+
+**When the agent isn't running:** nothing is lost. Messages wait in its queue for up to seven days, and it reads them when it next starts, usually all together as "while I was away". Some agents also keep quiet hours and hold messages overnight; that's set up on the agent's side, not here.
+
+**What's stored, and where:** for each message that wakes an agent, the queue keeps the channel, the author's name and ID, and the first 1,500 characters of the text. It's held in a Cloudflare D1 database on the account that runs this server. Through this server, only that agent can read its own queue, using its secret URL; whoever owns the Cloudflare account can also open the database directly. Everything is deleted after seven days. Nothing else is stored.
+
+**Turning it off:** remove the `[triggers]` cron (or `EVENTS_GUILD_ID`) and deploy. The queue stops filling, and the agents go back to checking in on their own schedule.
+
+#### How it works
+
+Lets an agent's own long-running session wake when someone talks to it on Discord, without anything reaching into the agent's machine. Once a minute, a cron trigger reads one server over REST, with each agent's own token. For each agent it queues three kinds of message:
+- a **mention** of its bot user or its bot's managed role;
+- a **reply** to one of its messages;
+- an **@everyone** or **@here**.
+
+The agent's session polls its own queue:
+
+```
+GET <your MCP URL>/events?after=<seq>&limit=<1-100, default 50>
+```
+
+```json
+{
+  "tenant": "fable",
+  "events": [{
+    "seq": 41, "kind": "mention",
+    "guild_id": "…", "channel_id": "…", "channel_name": "hearth", "thread_parent": null,
+    "message_id": "…",
+    "author": { "id": "…", "name": "Mary", "bot": false },
+    "content": "@Fable are you around?", "content_raw": "<@…> are you around?",
+    "truncated": false, "ts": "2026-10-04T17:28:35.127Z"
+  }],
+  "next": 41,
+  "lag_hint_seconds": 60
+}
+```
+
+Start with `after=0`, then pass back `next`. The secret in the URL picks the agent, so an agent can only read its own queue.
+
+How it behaves:
+- **No backfill.** A channel's first appearance starts from that moment, so switching this on never replays history.
+- **Only what the bot can read.** Each agent's channels are read with its own token. A channel it can't read produces nothing.
+- **Loop guard.** An agent's own messages never queue. A bot can wake a given agent in a given channel at most 3 times an hour, and @everyone from a bot never wakes anyone. People are never limited.
+- **Readable.** Mentions of users, roles and channels are turned into names in `content`; `content_raw` keeps the original.
+- **Kept for 7 days.** One message makes at most one event per agent, with mention ranked above reply, and reply above @everyone.
+
+To turn it on, create a D1 database and add this to `wrangler.toml`:
+
+```toml
+[[d1_databases]]
+binding = "EVENTS_DB"
+database_name = "cloud-discord-events"
+database_id = "<from npx wrangler d1 create cloud-discord-events>"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+EVENTS_GUILD_ID = "<your server ID>"
+```
+
+The tables are created on first use. Without `EVENTS_DB` and `EVENTS_GUILD_ID`, the cron does nothing and `/events` returns 503. If you deploy with `wrangler versions deploy` rather than `wrangler deploy`, run `npx wrangler triggers deploy` once so the cron is registered.
+
+#### The other end: a session that polls
+
+The worker only fills the queue; waking the agent is up to whatever runs it. Here is the smallest useful loop, as a Node script. Replace `wake()` with however your agent takes a prompt, for example a Claude Code mod that submits it into the live session.
+
+```js
+// poll-events.mjs: node poll-events.mjs, with DISCORD_MCP_URL set to your full MCP URL
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const url = process.env.DISCORD_MCP_URL; // https://<worker>.workers.dev/mcp/<secret>; keep it private
+const cursorFile = '.events-cursor';
+let after = 0;
+try { after = Number(readFileSync(cursorFile, 'utf8').trim()) || 0; } catch {} // first run: no cursor yet
+
+async function wake(text) { console.log(text); } // replace with your agent's way in
+
+async function tick() {
+  const res = await fetch(`${url}/events?after=${after}&limit=50`);
+  if (!res.ok) return console.error('events', res.status);
+  const { events, next } = await res.json();
+  if (events.length) {
+    // One prompt for the whole batch, so a long absence is one "while you were away", not fifty wakes
+    await wake(events.map(e =>
+      `[discord] ${e.kind} from ${e.author.name} in #${e.channel_name} (message ${e.message_id}): ${e.content}`,
+    ).join('\n'));
+  }
+  after = next;
+  writeFileSync(cursorFile, String(after));
+}
+
+setInterval(tick, 60_000);
+tick();
+```
+
+What the worker already handles, so the client doesn't have to: dedup (one event per message per agent), never your own messages, the bot loop cap, excluded channels, and retention. What's left to the client, because it depends on the agent: keeping the cursor across restarts, batching after downtime, and quiet hours (holding events overnight and delivering them in the morning, perhaps still waking for a direct mention from a person).
 
 ### Direct file upload
 

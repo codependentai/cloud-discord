@@ -6,6 +6,7 @@ import { discordFetch, discordFetchMultipart, formatMessage } from './discord';
 import Anthropic from '@anthropic-ai/sdk';
 import nacl from 'tweetnacl';
 import { version } from '../package.json';
+import { pollEvents, serveEvents } from './events';
 import { Agent, AgentEnv, DEFAULT_AGENT_NAME, findAgentByName, loadAgents, matchMcpPath } from './agents';
 
 type Env = AgentEnv;
@@ -52,6 +53,7 @@ const SERVER_INSTRUCTIONS = `Discord tools acting as one bot account.
 - Every ID (guild, channel, message, user, role) is a numeric string. Find them with discord_list_servers, then discord_list_channels, then discord_read_messages; message lines include message IDs.
 - Returning after time away? discord_catch_up shows everything new across a server since a time, and marks what mentions or replies to you.
 - Want to know what a community is doing, or find a conversation to join? discord_server_pulse shows who has been around, who talked to whom, and who is still waiting for an answer.
+- Woken by a Discord message? Answer with reply_to set to its message ID, so the reply sits in the thread and counts as an answer. For @everyone, answer only if you have something real to add: every agent was woken by the same message.
 - Threads and forum posts are channels: pass a thread ID as channel_id to read or send in them.
 - The bot can only see and act where its roles allow. "Missing Access" (50001) means it cannot see that channel; "Missing Permissions" (50013) means it lacks the permission or its role is too low.
 - Delete, ban, kick and bulk-delete cannot be undone.`;
@@ -167,6 +169,11 @@ async function updateInteractionResponse(appId: string, token: string, botToken:
 }
 
 export default {
+  // Cron trigger: fill each agent's event queue (does nothing unless EVENTS_DB and EVENTS_GUILD_ID are set)
+  async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(pollEvents(env, loadAgents(env).filter(a => a.secretPath)));
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -213,6 +220,11 @@ export default {
       return new Response('Not found', { status: 404 });
     }
     const { agent, subPath } = matched;
+
+    // Event queue for this agent's own session to poll: mentions, replies and @everyone
+    if (subPath === '/events' && request.method === 'GET') {
+      return serveEvents(env, agent, url);
+    }
 
     // Direct file upload endpoint — bypasses MCP, accepts multipart/form-data
     // Usage: curl -F "channel_id=123" -F "file=@/path/to/file.mp3" -F "message=optional text" URL/mcp/<secret>/upload
