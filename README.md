@@ -36,7 +36,7 @@ You deploy it once to your own Cloudflare account and connect any MCP client to 
 ### 2. Clone and install
 
 ```bash
-git clone https://github.com/codependentai/cloud-discord.git
+git clone https://github.com/nekyialabs/cloud-discord.git
 cd cloud-discord
 npm install
 ```
