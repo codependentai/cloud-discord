@@ -100,7 +100,10 @@ function classify(msg: any, botId: string, botRoleId: string | undefined): Kind 
 export async function pollEvents(env: EventsEnv, agents: Agent[]): Promise<void> {
   const db = env.EVENTS_DB;
   const guildId = env.EVENTS_GUILD_ID;
-  if (!db || !guildId || agents.length === 0) return;
+  if (!db || !guildId || agents.length === 0) {
+    console.log(`[events] skipped: db=${!!db} guild=${!!guildId} agents=${agents.length}`);
+    return;
+  }
   await ensureSchema(db);
   const now = Date.now();
   const excluded = excludedSet(env.EVENTS_EXCLUDE_CHANNELS);
@@ -115,7 +118,7 @@ export async function pollEvents(env: EventsEnv, agents: Agent[]): Promise<void>
 
   for (const agent of agents) {
     try {
-      await pollAgent(db, guildId, agent, excluded, roles, roleNames, now);
+      console.log(`[events] ${agent.name}: ${await pollAgent(db, guildId, agent, excluded, roles, roleNames, now)}`);
     } catch (error) {
       console.error(`[events] ${agent.name}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -127,17 +130,17 @@ export async function pollEvents(env: EventsEnv, agents: Agent[]): Promise<void>
 async function pollAgent(
   db: D1Database, guildId: string, agent: Agent, excluded: Set<string>,
   roles: any[], roleNames: Map<string, string>, now: number,
-): Promise<void> {
+): Promise<string> {
   const token = agent.discordToken;
   const botId = await botIdFor(token);
-  if (!botId) return;
+  if (!botId) return "can't read its own bot user";
   const botRoleId = roles.find(r => r.managed && r.tags?.bot_id === botId)?.id as string | undefined;
 
   const [chRes, threadRes] = await Promise.all([
     discordFetch(token, 'GET', `/guilds/${guildId}/channels`),
     discordFetch(token, 'GET', `/guilds/${guildId}/threads/active`),
   ]);
-  if (!chRes.ok) return;
+  if (!chRes.ok) return `can't list channels (${chRes.status})`;
   const channels = chRes.data as any[];
   const channelNames = new Map(channels.map(c => [c.id as string, c.name as string]));
   const threads = threadRes.ok ? ((threadRes.data as any).threads ?? []) : [];
@@ -155,15 +158,17 @@ async function pollAgent(
   const writes: D1PreparedStatement[] = [];
   // Bot wakes queued this tick but not yet written, so the hourly cap holds within one batch
   const botWakesThisTick = new Map<string, number>();
+  let started = 0, read = 0, queued = 0;
   for (const c of watched) {
     const cursor = cursors.get(c.id);
     // First sight of a channel starts from now: turning this on never replays history
-    if (!cursor) { writes.push(setCursor(c.id, c.last_message_id)); continue; }
+    if (!cursor) { writes.push(setCursor(c.id, c.last_message_id)); started++; continue; }
     if (BigInt(c.last_message_id) <= BigInt(cursor)) continue;
 
     const res = await discordFetch(token, 'GET', `/channels/${c.id}/messages?after=${cursor}&limit=100`);
     // A channel this bot can't read stays where it was; nothing from it is queued
     if (!res.ok) continue;
+    read++;
     const messages = (res.data as any[]).sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
     if (messages.length === 0) continue;
 
@@ -198,10 +203,12 @@ async function pollAgent(
         m.timestamp, now,
       );
       writes.push(stmt);
+      queued++;
     }
     writes.push(setCursor(c.id, messages[messages.length - 1].id));
   }
   if (writes.length) await db.batch(writes);
+  return `${watched.length} channel(s) watched, ${started} started, ${read} read, ${queued} queued`;
 }
 
 // GET /mcp/<secret>/events?after=<seq>&limit=<n>: this agent's queue, oldest first
