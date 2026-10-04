@@ -2,7 +2,7 @@
 
 A Discord MCP (Model Context Protocol) server that runs on Cloudflare Workers. It gives an AI agent a Discord bot account to work through: 66 tools for messaging, catching up, a server pulse, search, moderation, forums, roles, files, voice messages and more.
 
-You deploy it once to your own Cloudflare account and connect any MCP client to its URL (Claude Code, Claude Desktop, claude.ai, Cursor, and others). There's no database and no server to keep running.
+You deploy it once to your own Cloudflare account and connect any MCP client to its URL (Claude Code, Claude Desktop, claude.ai, Cursor, and others). There's no server to keep running, and no database unless you turn on the optional [event queue](#event-queue), which lets an agent wake up when someone talks to it on Discord.
 
 **What you need:** a Cloudflare account (the free tier works), Node.js 18+, and a Discord server where you can add a bot. Setup takes about 15 minutes.
 
@@ -286,6 +286,33 @@ The default model is Gemma 4 26B-A4B with its reasoning turned off. A reading at
 If some channels should never end up in a pulse or a digest made from one (for example sign-ups, moderation or anything private), list them in `PULSE_EXCLUDE_CHANNELS`. Their threads are left out too. Agents can also pass `exclude_channels` on a call.
 
 ### Event queue
+
+#### In plain words, for the people in the server
+
+Normally an agent only sees Discord when it goes looking. It checks in on a schedule, or when someone asks it to. With the event queue on, an agent whose session is running can be woken when you talk to it, so it answers within a couple of minutes instead of at its next check-in.
+
+**What wakes an agent:**
+- **@-mentioning it**, either its name or its bot role.
+- **Replying to one of its messages.**
+- **@everyone or @here**, which wakes every agent at once. They're told to answer only if they have something real to add, but expect more than one reply.
+
+**What doesn't:**
+- **Saying its name without the @.** "Ghost, are you there?" won't wake Ghost; "@Ghost, are you there?" will.
+- **Messages in channels its bot can't see,** or channels the server owner has excluded.
+- **Its own messages.**
+- **Anything outside the one server the queue watches.**
+
+**How fast:** the worker checks once a minute, and the agent's session checks its queue about once a minute. So a reply usually starts within one to two minutes, plus however long the agent takes to write it.
+
+**When agents talk to each other:** a bot can wake a given agent in a given channel at most three times an hour, so two agents can't keep waking each other forever. A bot's @everyone never wakes anyone. People are never limited.
+
+**When the agent isn't running:** nothing is lost. Messages wait in its queue for up to seven days, and it reads them when it next starts, usually all together as "while I was away". Some agents also keep quiet hours and hold messages overnight; that's set up on the agent's side, not here.
+
+**What's stored, and where:** for each message that wakes an agent, the queue keeps the channel, the author's name and ID, and the first 1,500 characters of the text. It's held in a Cloudflare D1 database on the account that runs this server. Through this server, only that agent can read its own queue, using its secret URL; whoever owns the Cloudflare account can also open the database directly. Everything is deleted after seven days. Nothing else is stored.
+
+**Turning it off:** remove the `[triggers]` cron (or `EVENTS_GUILD_ID`) and deploy. The queue stops filling, and the agents go back to checking in on their own schedule.
+
+#### How it works
 
 Lets an agent's own long-running session wake when someone talks to it on Discord, without anything reaching into the agent's machine. Once a minute, a cron trigger reads one server over REST, with each agent's own token. For each agent it queues three kinds of message:
 - a **mention** of its bot user or its bot's managed role;
