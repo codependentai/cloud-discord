@@ -13,7 +13,7 @@ You deploy it once to your own Cloudflare account and connect any MCP client to 
 - [Configuration reference](#configuration-reference)
 - [Troubleshooting](#troubleshooting)
 - [Tips for agents](#tips-for-agents)
-- [Optional features](#optional-features): `/vibe`, voice notes, direct file upload
+- [Optional features](#optional-features): `/vibe`, voice notes, server pulse, event queue, direct file upload
 - [Tool reference](#tool-reference)
 - [Development](#development)
 
@@ -224,6 +224,11 @@ For local development, put secrets in `.dev.vars` (copy `.dev.vars.example`). It
 | Search says the server is being indexed | First search in that server | Try again after the few seconds it names |
 | `Rate limited; retry after Ns` | Discord asked the bot to slow down for longer than the server waits | Wait that long and try again |
 | Voice note: `ElevenLabs API key not configured` | `ELEVENLABS_API_KEY` isn't set | `npx wrangler secret put ELEVENLABS_API_KEY` |
+| Pulse mood says it's unavailable | No Workers AI binding | Add `[ai] binding = "AI"` to `wrangler.toml` and deploy |
+| `/events` returns 503 `events not configured` | `EVENTS_DB` or `EVENTS_GUILD_ID` is missing | See [Event queue](#event-queue) |
+| `/events` stays empty right after switching on | Expected: there's no backfill, and each channel starts from the first tick that sees it | Wait a minute, then mention the bot to test |
+| `/events` never fills | The cron isn't running, or can't read the channels | `npm run tail` and look for one `[events]` line per agent each minute. No lines: run `npx wrangler triggers deploy` (needed once if you deploy with `versions deploy`). "0 channel(s) watched": check `EVENTS_GUILD_ID` and the bot's View Channel permission |
+| Events from one channel never arrive | That bot can't read the channel (each agent reads with its own token), or it's excluded | Grant View Channel and Read Message History, or check `EVENTS_EXCLUDE_CHANNELS` |
 
 To see live logs from your deployed Worker, run `npm run tail`.
 
@@ -240,6 +245,7 @@ The server sends these to MCP clients as instructions, and they're here for huma
 - **Tools are annotated.** Read-only tools are marked `readOnlyHint`, and tools that delete, ban, kick, or change permissions are marked `destructiveHint`, so clients can ask before running them.
 - **Mentions are safe by default.** User mentions ping, but @everyone, @here and role mentions don't unless a tool call sets `allow_mass_mentions: true`.
 - **Long messages are fine.** Anything over Discord's 2000-character limit is split at paragraph or line breaks, with code blocks kept intact.
+- **Woken by a Discord message?** If your session polls the [event queue](#event-queue), answer with `reply_to` set to the message ID you were given, so the answer sits in its thread and people (and `discord_server_pulse`) can see it was answered. For an @everyone, answer only if you have something real to add, because every agent got the same wake.
 - **Images come back as images.** `discord_fetch_image` returns the picture itself, not a link, so a vision-capable model can look at it.
 
 ## Optional features
@@ -332,7 +338,42 @@ crons = ["* * * * *"]
 EVENTS_GUILD_ID = "<your server ID>"
 ```
 
-The tables are created on first use. Without `EVENTS_DB` and `EVENTS_GUILD_ID`, the cron does nothing and `/events` returns 503.
+The tables are created on first use. Without `EVENTS_DB` and `EVENTS_GUILD_ID`, the cron does nothing and `/events` returns 503. If you deploy with `wrangler versions deploy` rather than `wrangler deploy`, run `npx wrangler triggers deploy` once so the cron is registered.
+
+#### The other end: a session that polls
+
+The worker only fills the queue; waking the agent is up to whatever runs it. Here is the smallest useful loop, as a Node script. Replace `wake()` with however your agent takes a prompt, for example a Claude Code mod that submits it into the live session.
+
+```js
+// poll-events.mjs: node poll-events.mjs, with DISCORD_MCP_URL set to your full MCP URL
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const url = process.env.DISCORD_MCP_URL; // https://<worker>.workers.dev/mcp/<secret>; keep it private
+const cursorFile = '.events-cursor';
+let after = 0;
+try { after = Number(readFileSync(cursorFile, 'utf8').trim()) || 0; } catch {} // first run: no cursor yet
+
+async function wake(text) { console.log(text); } // replace with your agent's way in
+
+async function tick() {
+  const res = await fetch(`${url}/events?after=${after}&limit=50`);
+  if (!res.ok) return console.error('events', res.status);
+  const { events, next } = await res.json();
+  if (events.length) {
+    // One prompt for the whole batch, so a long absence is one "while you were away", not fifty wakes
+    await wake(events.map(e =>
+      `[discord] ${e.kind} from ${e.author.name} in #${e.channel_name} (message ${e.message_id}): ${e.content}`,
+    ).join('\n'));
+  }
+  after = next;
+  writeFileSync(cursorFile, String(after));
+}
+
+setInterval(tick, 60_000);
+tick();
+```
+
+What the worker already handles, so the client doesn't have to: dedup (one event per message per agent), never your own messages, the bot loop cap, excluded channels, and retention. What's left to the client, because it depends on the agent: keeping the cursor across restarts, batching after downtime, and quiet hours (holding events overnight and delivering them in the morning, perhaps still waking for a direct mention from a person).
 
 ### Direct file upload
 
