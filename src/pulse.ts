@@ -205,15 +205,15 @@ export async function serverPulse(token: string, args: Record<string, unknown>, 
     out.push(`- ${p.name}${p.bot ? ' [bot]' : ''}${id === botId ? ' (you)' : ''}: ${p.count} message(s) in ${[...p.channels].join(', ')}${last}`);
   }
 
-  out.push('', '## Who talked to whom (replies and mentions)');
+  out.push('', "## Who talked to whom (Discord replies and @-mentions only; an answer that just uses someone's name isn't counted)");
   if (edges.size === 0) {
-    out.push('- Nobody replied to or mentioned anyone. Everyone posted on their own.');
+    out.push('- No Discord replies or @-mentions between anyone. People may still have answered by name.');
   } else {
     const name = (id: string) => `${people.get(id)?.name ?? id}${id === botId ? ' (you)' : ''}`;
     for (const [key, n] of [...edges.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25)) {
       const [from, to] = key.split('→');
       const back = edges.get(`${to}→${from}`);
-      out.push(`- ${name(from)} → ${name(to)}: ${n}${back ? '' : ' (no reply back in this window)'}`);
+      out.push(`- ${name(from)} → ${name(to)}: ${n}${back ? '' : " (no @-mention or reply back in this window; check before assuming they weren't answered)"}`);
     }
   }
 
